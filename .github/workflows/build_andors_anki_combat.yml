@@ -1,0 +1,63 @@
+name: Build Andors Trail Anki Combat APK
+
+on:
+  push:
+    branches:
+      - chatgpt/typed-retry-rating
+    paths:
+      - "andors-trail-integration/**"
+      - ".github/workflows/build_andors_anki_combat.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout integration files
+        uses: actions/checkout@v4
+        with:
+          path: integration-repo
+
+      - name: Checkout current Andor's Trail
+        uses: actions/checkout@v4
+        with:
+          repository: AndorsTrailRelease/andors-trail
+          ref: master
+          path: andors-src
+
+      - name: Configure JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 36 SDK
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Apply Anki combat integration
+        run: python3 integration-repo/andors-trail-integration/apply_patch.py andors-src
+
+      - name: Build debug APK
+        working-directory: andors-src/AndorsTrail
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleDebug --stacktrace
+
+      - name: List APK outputs
+        run: find andors-src/AndorsTrail/app/build/outputs/apk -type f -name "*.apk" -print
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: andors-trail-anki-combat-apk
+          path: andors-src/AndorsTrail/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
