@@ -637,7 +637,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		ankiReveal.setVisibility(View.GONE);
 
 		// The highlighted comparison itself is the feedback. Keep the old feedback
-		// view hidden; this integration no longer needs ANKI_CORRECT/ANKI_WRONG labels.
+		// view hidden; the integrated game UI does not need separate result labels.
 		ankiFeedback.setText("");
 		ankiFeedback.setVisibility(View.GONE);
 		ankiAnswer.setText(buildAnswerComparison(
