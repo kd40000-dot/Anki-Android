@@ -217,32 +217,56 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:gravity="center"
+                android:minHeight="54dp"
                 android:minWidth="0dp"
-                android:text="Again" />
+                android:paddingLeft="2dp"
+                android:paddingRight="2dp"
+                android:text="Again"
+                android:textAllCaps="false"
+                android:textSize="14sp" />
 
             <Button
                 android:id="@+id/combatview_anki_hard"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:gravity="center"
+                android:minHeight="54dp"
                 android:minWidth="0dp"
-                android:text="Hard" />
+                android:paddingLeft="2dp"
+                android:paddingRight="2dp"
+                android:text="Hard"
+                android:textAllCaps="false"
+                android:textSize="14sp" />
 
             <Button
                 android:id="@+id/combatview_anki_good"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:gravity="center"
+                android:minHeight="54dp"
                 android:minWidth="0dp"
-                android:text="Good" />
+                android:paddingLeft="2dp"
+                android:paddingRight="2dp"
+                android:text="Good"
+                android:textAllCaps="false"
+                android:textSize="14sp" />
 
             <Button
                 android:id="@+id/combatview_anki_easy"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:gravity="center"
+                android:minHeight="54dp"
                 android:minWidth="0dp"
-                android:text="Easy" />
+                android:paddingLeft="2dp"
+                android:paddingRight="2dp"
+                android:text="Easy"
+                android:textAllCaps="false"
+                android:textSize="14sp" />
         </LinearLayout>
     </LinearLayout>
 
