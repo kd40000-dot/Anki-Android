@@ -29,6 +29,10 @@ jobs:
           repository: AndorsTrailRelease/andors-trail
           ref: master
           path: andors-src
+          filter: blob:none
+          sparse-checkout: |
+            AndorsTrail
+          sparse-checkout-cone-mode: true
 
       - name: Configure JDK
         uses: actions/setup-java@v4
