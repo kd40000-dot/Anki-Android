@@ -1477,7 +1477,7 @@ class CardContentProvider : ContentProvider() {
     }
 
     private fun isAllowedAndorsTrailCaller(): Boolean {
-        val callingUid = Binder.getCallingUid()
+        val callingUid = android.os.Binder.getCallingUid()
 
         // Self-calls are handled by the normal permission path above.
         if (callingUid == android.os.Process.myUid()) {
