@@ -1,11 +1,8 @@
 package com.gpl.rpg.AndorsTrail.view;
 
 import android.annotation.SuppressLint;
-import android.app.Activity;
 import android.content.Context;
-import android.content.pm.PackageManager;
 import android.content.res.Resources;
-import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
@@ -45,8 +42,6 @@ import com.gpl.rpg.AndorsTrail.model.actor.Player;
 import com.gpl.rpg.AndorsTrail.util.Coord;
 
 public final class CombatView extends RelativeLayout implements CombatSelectionListener, CombatTurnListener, ActorStatsListener, ActorConditionListener {
-	public static final int REQUEST_ANKI_PERMISSION = 4817;
-
 	private final RangeBar playerAPBar;
 	private final Button attackMoveButton;
 	private final Button endTurnButton;
@@ -318,15 +313,11 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 				}
 
 				if (error != null) {
-					if (error instanceof SecurityException && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-						try {
-							((Activity) getContext()).requestPermissions(
-									new String[]{AnkiCombatReviewClient.PERMISSION},
-									REQUEST_ANKI_PERMISSION);
-						} catch (Exception ignored) {
-						}
+					String detail = error.getMessage();
+					if (error instanceof SecurityException) {
+						detail = "AnkiDroid Retry provider access was denied. Install/update the compatible AnkiDroid Retry build.";
 					}
-					fallbackToNormalCombat("Could not load Anki card: " + error.getMessage());
+					fallbackToNormalCombat("Could not load Anki card: " + detail);
 					return;
 				}
 
@@ -721,15 +712,6 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		if (message != null && !message.isEmpty()) {
 			Toast.makeText(getContext(), message + " Normal combat enabled.", Toast.LENGTH_LONG).show();
 		}
-	}
-
-	public void onAnkiPermissionResult(boolean granted) {
-		if (!world.model.uiSelections.isInCombat || !world.model.uiSelections.isPlayersCombatTurn) return;
-		// The custom AnkiDroid build also has a package allowlist, so try the provider again
-		// even if Android's custom-permission dialog reports an unexpected result.
-		ankiSession.operationId++;
-		ankiSession.setPhase(CombatController.AnkiCombatSession.Phase.IDLE);
-		loadAnkiCardForPlayerTurn();
 	}
 
 	private void toggleConditionsBarVisibility() {
