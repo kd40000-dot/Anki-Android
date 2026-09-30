@@ -195,6 +195,23 @@ abstract class AbstractFlashcardViewer :
     @VisibleForTesting
     val jsApi by lazy { AnkiDroidJsAPI(this) }
 
+    /**
+     * Result reported by a typed-answer card after its answer side has rendered.
+     * null means this card is not participating in the typed retry workflow.
+     */
+    private var typedAnswerWasCorrect: Boolean? = null
+
+    /**
+     * Card that entered retry mode by receiving AGAIN after a wrong typed answer.
+     * The id survives the native undo so a later correct retry can force any ease
+     * button to record AGAIN.
+     */
+    private var typedRetryCardId: CardId? = null
+
+    internal fun setTypedAnswerResult(correct: Boolean) {
+        typedAnswerWasCorrect = correct
+    }
+
     private var tagsDialogFactory: TagsDialogFactory? = null
 
     /**
@@ -523,6 +540,13 @@ abstract class AbstractFlashcardViewer :
         refreshRequired = null // this method is called on refresh
 
         updateCurrentCard()
+
+        // Do not let retry state leak to another card if the reviewer advances for any
+        // reason other than the deliberate AGAIN -> native Undo flow above.
+        if (typedRetryCardId != null && currentCard?.id != typedRetryCardId) {
+            typedRetryCardId = null
+        }
+        typedAnswerWasCorrect = null
 
         if (currentCard == null) {
             closeReviewer(RESULT_NO_MORE_CARDS)
@@ -875,12 +899,45 @@ abstract class AbstractFlashcardViewer :
                     // workaround for a broken ReviewerKeyboardInputTest
                     return@launchCatchingTask
                 }
-                // Temporarily sets the answer indicator dots appearing below the toolbar
-                previousAnswerIndicator?.displayAnswerIndicator(rating)
-                stopCardMediaPlayer()
-                currentEase = rating
 
-                answerCardInner(rating)
+                val cardId = currentCard?.id
+                val retryActiveForCurrentCard = cardId != null && typedRetryCardId == cardId
+                val typedResult = typedAnswerWasCorrect
+
+                // A correct answer after a native-undo retry must always be scheduled as AGAIN,
+                // regardless of which of the four native ease buttons the user presses.
+                val effectiveRating =
+                    if (typedResult == true && retryActiveForCurrentCard) {
+                        Rating.AGAIN
+                    } else {
+                        rating
+                    }
+
+                // Temporarily sets the answer indicator dots appearing below the toolbar
+                previousAnswerIndicator?.displayAnswerIndicator(effectiveRating)
+                stopCardMediaPlayer()
+                currentEase = effectiveRating
+
+                // Consume the result for this answer side. A retry will report a fresh result.
+                typedAnswerWasCorrect = null
+
+                if (typedResult == false && rating == Rating.AGAIN) {
+                    // The user explicitly chose retry: record the normal AGAIN first, then use
+                    // AnkiDroid's native undo stack and redraw the restored card's question side.
+                    typedRetryCardId = cardId
+                    answerCardInner(Rating.AGAIN)
+                    undoAndShowSnackbar(duration = Reviewer.ACTION_SNACKBAR_TIME)
+                    updateCardAndRedraw()
+                    return@launchCatchingTask
+                }
+
+                // Hard/Good/Easy on a wrong retry exits retry mode normally.
+                // A correct retry also exits after its forced AGAIN is recorded.
+                if (retryActiveForCurrentCard) {
+                    typedRetryCardId = null
+                }
+
+                answerCardInner(effectiveRating)
                 updateCardAndRedraw()
             }
         }
