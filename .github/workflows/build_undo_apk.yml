@@ -29,17 +29,16 @@ jobs:
         with:
           cache-provider: basic
 
-      - name: Build side-by-side universal release APK
-        run: |
-          ./gradlew :AnkiDroid:assembleFullRelease             -Duniversal-apk=true             -PcustomSuffix=.undo             -PcustomName="AnkiDroid Undo"             --daemon
+      - name: Build side-by-side universal debug APK
+        run: ./gradlew :AnkiDroid:assembleFullDebug --daemon
 
       - name: List APK outputs
-        run: find AnkiDroid/build/outputs/apk/full/release -maxdepth 1 -type f -name "*.apk" -print
+        run: find AnkiDroid/build/outputs/apk/full/debug -maxdepth 1 -type f -name "*.apk" -print
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: ankidroid-undo-apks
-          path: AnkiDroid/build/outputs/apk/full/release/*.apk
+          name: ankidroid-undo-debug-apks
+          path: AnkiDroid/build/outputs/apk/full/debug/*.apk
           if-no-files-found: error
           retention-days: 14
