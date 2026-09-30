@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - chatgpt/andors-trail-anki-combat
+      - chatgpt/andors-trail-anki-resilient
   workflow_dispatch:
 
 permissions:
