@@ -18,9 +18,6 @@
 	<!-- Storage access permissions - keep for Android 12 and below -->
 	<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
 	<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-	<!-- Custom AnkiDroid build used by the combat study integration -->
-	<uses-permission android:name="com.ichi2.anki.retry.permission.READ_WRITE_DATABASE" />
-
 	<uses-feature android:name="android.software.leanback" android:required="false"/>
 	<uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
 
