@@ -85,7 +85,9 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 			try {
 				runAnkiHealthCheck();
 			} finally {
-				ankiMainHandler.postDelayed(this, 600);
+				if (isAttachedToWindow()) {
+					ankiMainHandler.postDelayed(this, 600);
+				}
 			}
 		}
 	};
@@ -256,6 +258,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	}
 
 	private void beginAnkiQuestion(AnkiCombatReviewClient.ReviewCard card) {
+		ankiSession.bypassForCurrentTurn = false;
 		ankiSession.card = card;
 		ankiSession.resetAttempt();
 		card.shownAtMs = System.currentTimeMillis();
@@ -266,6 +269,12 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 
 	private void loadAnkiCardForPlayerTurn() {
 		if (!world.model.uiSelections.isInCombat || !world.model.uiSelections.isPlayersCombatTurn) return;
+		if (ankiSession.bypassForCurrentTurn) {
+			controllers.combatController.setAnkiQuizGateActive(false);
+			ankiQuiz.setVisibility(View.GONE);
+			actionBar.setVisibility(View.VISIBLE);
+			return;
+		}
 
 		if (ankiSession.retryActive && ankiSession.retryCard != null
 				&& ankiSession.phase == CombatController.AnkiCombatSession.Phase.IDLE) {
@@ -437,7 +446,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 			ankiStatus.setText(ankiSession.pendingTappedEase != ankiSession.pendingEffectiveEase
 					? "Saving " + effective + " (you tapped " + tapped + ")…"
 					: "Saving " + effective + "…");
-			if (System.currentTimeMillis() - ankiSession.phaseStartedAt > 8000) {
+			if (System.currentTimeMillis() - ankiSession.phaseStartedAt > 30000) {
 				ankiRecover.setVisibility(View.VISIBLE);
 			}
 		} else if (!ankiSession.errorMessage.isEmpty()) {
@@ -470,7 +479,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 				controllers.combatController.setAnkiQuizGateActive(false);
 				ankiQuiz.setVisibility(View.GONE);
 				actionBar.setVisibility(View.VISIBLE);
-				if (allowLoad) loadAnkiCardForPlayerTurn();
+				if (allowLoad && !ankiSession.bypassForCurrentTurn) loadAnkiCardForPlayerTurn();
 				break;
 			case LOADING:
 				renderLoadingState();
@@ -644,6 +653,11 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		if (!world.model.uiSelections.isInCombat || !world.model.uiSelections.isPlayersCombatTurn) return;
 
 		if (ankiSession.phase == CombatController.AnkiCombatSession.Phase.SUBMITTING) {
+			long age = System.currentTimeMillis() - ankiSession.phaseStartedAt;
+			if (age < 30000) {
+				Toast.makeText(getContext(), "The rating is still being saved.", Toast.LENGTH_SHORT).show();
+				return;
+			}
 			lastSubmissionProbeOperation = -1L;
 			probeStalledSubmission();
 			return;
@@ -674,7 +688,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		long age = System.currentTimeMillis() - ankiSession.phaseStartedAt;
 
 		if (ankiSession.phase == CombatController.AnkiCombatSession.Phase.IDLE) {
-			loadAnkiCardForPlayerTurn();
+			if (!ankiSession.bypassForCurrentTurn) loadAnkiCardForPlayerTurn();
 			return;
 		}
 
@@ -687,7 +701,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 			return;
 		}
 
-		if (ankiSession.phase == CombatController.AnkiCombatSession.Phase.SUBMITTING && age > 15000) {
+		if (ankiSession.phase == CombatController.AnkiCombatSession.Phase.SUBMITTING && age > 30000) {
 			probeStalledSubmission();
 		}
 
@@ -697,6 +711,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 
 	private void fallbackToNormalCombat(String message) {
 		controllers.combatController.resetAnkiQuizAndUnlockCombat();
+		ankiSession.bypassForCurrentTurn = true;
 		ankiQuiz.setVisibility(View.GONE);
 		actionBar.setVisibility(View.VISIBLE);
 		setRatingButtonsEnabled(true);
@@ -904,6 +919,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 
 	@Override
 	public void onNewPlayerTurn() {
+		ankiSession.bypassForCurrentTurn = false;
 		updateTurnInfo(null);
 		loadAnkiCardForPlayerTurn();
 	}
