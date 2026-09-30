@@ -130,6 +130,14 @@ public final class AnkiCombatReviewClient {
         return resolver.update(SCHEDULE_URI, values, null, null) > 0;
     }
 
+    public int getCardReps(ContentResolver resolver, ReviewCard card) {
+        Uri cardUri = Uri.parse("content://" + AUTHORITY + "/notes/" + card.noteId + "/cards/" + card.cardOrd);
+        try (Cursor cur = resolver.query(cardUri, new String[]{"reps"}, null, null, null)) {
+            if (cur == null || !cur.moveToFirst()) return -1;
+            return cur.getInt(cur.getColumnIndexOrThrow("reps"));
+        }
+    }
+
     /**
      * Mirrors the user's SmartTypeField defaults closely:
      * - trims whitespace
