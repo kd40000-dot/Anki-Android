@@ -1,0 +1,45 @@
+{{Front}}
+
+<hr id=answer>
+
+{{type:Back}}
+
+<br>
+<details>
+  <summary>Notes</summary>
+  <div style="text-align: left;">{{Notes}}</div>
+</details>
+<br>
+
+<!-- Register the retry controller before Smart Type Field reports its result. -->
+<script src="_ankiRetryUndo.js"></script>
+
+<!-- Preserve the original ANKI_WRONG / ANKI_CORRECT marker contract. -->
+<script>
+document.addEventListener("smarterTypeFieldResult", function(event) {
+    var correct = !!(event.detail && event.detail.correct);
+
+    var oldWrong = document.getElementById("anki-wrong-marker");
+    var oldCorrect = document.getElementById("anki-correct-marker");
+    if (oldWrong) oldWrong.remove();
+    if (oldCorrect) oldCorrect.remove();
+
+    var marker = document.createElement("span");
+
+    if (correct) {
+        marker.textContent = "ANKI_CORRECT";
+        marker.id = "anki-correct-marker";
+    } else {
+        marker.textContent = "ANKI_WRONG";
+        marker.id = "anki-wrong-marker";
+    }
+
+    document.body.appendChild(marker);
+}, { once: true });
+</script>
+
+<script
+  role="smarterTypeField"
+  src="_smarterTypeField.retryUndo2026-09-30.js"
+  data-config="2026-09-03_11-47-57">
+</script>
