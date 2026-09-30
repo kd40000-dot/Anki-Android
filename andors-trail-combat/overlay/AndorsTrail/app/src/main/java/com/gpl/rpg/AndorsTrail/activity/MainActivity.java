@@ -142,16 +142,6 @@ public final class MainActivity
 	}
 
 	@Override
-	public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
-		super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-		if (requestCode == CombatView.REQUEST_ANKI_PERMISSION) {
-			boolean granted = grantResults.length > 0
-					&& grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED;
-			if (combatview != null) combatview.onAnkiPermissionResult(granted);
-		}
-	}
-
-	@Override
 	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
 		super.onActivityResult(requestCode, resultCode, data);
 		switch (requestCode) {
