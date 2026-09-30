@@ -191,6 +191,13 @@
             android:textIsSelectable="true"
             android:visibility="gone" />
 
+        <Button
+            android:id="@+id/combatview_anki_recover"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Recover quiz"
+            android:visibility="gone" />
+
         <LinearLayout
             android:id="@+id/combatview_anki_ratings"
             android:layout_width="match_parent"
