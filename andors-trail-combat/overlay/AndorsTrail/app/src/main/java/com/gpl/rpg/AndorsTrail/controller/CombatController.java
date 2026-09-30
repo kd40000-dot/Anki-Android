@@ -72,6 +72,7 @@ public final class CombatController implements VisualEffectCompletedCallback {
 		public int pendingTappedEase = 0;
 		public int pendingEffectiveEase = 0;
 		public boolean pendingShouldAttack = false;
+		public boolean bypassForCurrentTurn = false;
 
 		public void setPhase(Phase newPhase) {
 			phase = newPhase;
@@ -94,6 +95,7 @@ public final class CombatController implements VisualEffectCompletedCallback {
 			card = null;
 			retryCard = null;
 			retryActive = false;
+			bypassForCurrentTurn = false;
 			resetAttempt();
 			phaseStartedAt = System.currentTimeMillis();
 		}
