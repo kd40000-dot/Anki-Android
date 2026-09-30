@@ -13,9 +13,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    env:
-      MINIFY_ENABLED: "false"
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,21 +28,16 @@ jobs:
         with:
           cache-provider: basic
 
-      - name: Build stable side-by-side release APK
-        run: |
-          ./gradlew :AnkiDroid:assembleFullRelease \
-            -Duniversal-apk=true \
-            -PcustomSuffix=.retry \
-            -PcustomName="AnkiDroid Retry" \
-            --daemon
+      - name: Build stable side-by-side retry APK
+        run: ./gradlew :AnkiDroid:assembleFullDebug --daemon
 
       - name: List APK outputs
-        run: find AnkiDroid/build/outputs/apk/full/release -maxdepth 1 -type f -name "*.apk" -print
+        run: find AnkiDroid/build/outputs/apk/full/debug -maxdepth 1 -type f -name "*.apk" -print
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
           name: ankidroid-typed-retry-apks
-          path: AnkiDroid/build/outputs/apk/full/release/*.apk
+          path: AnkiDroid/build/outputs/apk/full/debug/*.apk
           if-no-files-found: error
           retention-days: 14
