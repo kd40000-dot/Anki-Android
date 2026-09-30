@@ -64,6 +64,8 @@ const jsApiList = {
     ankiShowOptionsMenu: "showOptionsMenu",
     ankiShowToast: "showToast",
     ankiShowAnswer: "showAnswer",
+    ankiUndo: "undo",
+    ankiSetTypeAnswerResult: "setTypeAnswerResult",
     ankiAnswerEase1: "answerEase1",
     ankiAnswerEase2: "answerEase2",
     ankiAnswerEase3: "answerEase3",
