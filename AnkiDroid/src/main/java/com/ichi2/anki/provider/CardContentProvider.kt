@@ -1462,11 +1462,10 @@ class CardContentProvider : ContentProvider() {
     }
 
     private fun hasReadWritePermission(): Boolean {
-        // Personal debug integration: allow the Andor's Trail debug build to use this
-        // custom AnkiDroid review provider directly. Android's runtime handling of this
-        // custom dangerous permission is unreliable across devices, so keep the bypass
-        // narrowly scoped to this exact package and only in debug builds.
-        if (BuildConfig.DEBUG && callingPackage == "com.gpl.rpg.AndorsTrail.dev") {
+        // Personal integration: allow only our Andor's Trail test package to use this
+        // custom review provider. ContentProvider.callingPackage can legitimately be null
+        // on some Android/provider paths, so identify the caller by Binder UID instead.
+        if (BuildConfig.DEBUG && isAllowedAndorsTrailCaller()) {
             return true
         }
 
@@ -1474,6 +1473,20 @@ class CardContentProvider : ContentProvider() {
             context!!.checkCallingOrSelfPermission(FlashCardsContract.READ_WRITE_PERMISSION) == PackageManager.PERMISSION_GRANTED
         } else {
             context!!.checkCallingPermission(FlashCardsContract.READ_WRITE_PERMISSION) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun isAllowedAndorsTrailCaller(): Boolean {
+        val callingUid = Binder.getCallingUid()
+
+        // Self-calls are handled by the normal permission path above.
+        if (callingUid == android.os.Process.myUid()) {
+            return false
+        }
+
+        val packagesForUid = context!!.packageManager.getPackagesForUid(callingUid) ?: return false
+        return packagesForUid.any { pkg ->
+            pkg == "com.gpl.rpg.AndorsTrail.dev"
         }
     }
 
