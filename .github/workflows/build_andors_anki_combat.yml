@@ -3,7 +3,7 @@ name: Build Andors Trail Anki Combat APK
 on:
   push:
     branches:
-      - chatgpt/typed-retry-rating
+      - chatgpt/andors-anki-combat
     paths:
       - "andors-trail-integration/**"
       - ".github/workflows/build_andors_anki_combat.yml"
