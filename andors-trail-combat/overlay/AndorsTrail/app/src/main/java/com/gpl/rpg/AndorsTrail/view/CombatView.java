@@ -407,14 +407,14 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		}
 	}
 
-	private CharSequence buildAnswerComparison(String typed, String fullAnswer) {
+	private CharSequence buildAnswerComparison(String typed, String fullAnswer, boolean neutralBlank) {
 		String expected = closestAnswerAlternative(typed, fullAnswer);
 		java.util.List<DiffPiece> pieces = alignAnswer(typed, expected);
 		SpannableStringBuilder out = new SpannableStringBuilder();
 
 		appendColored(out, "You:  ", ANSWER_NEUTRAL_COLOR, true);
 		if (typed == null || typed.trim().isEmpty()) {
-			appendColored(out, "(blank)", ANSWER_BAD_COLOR, false);
+			appendColored(out, "(blank)", neutralBlank ? ANSWER_NEUTRAL_COLOR : ANSWER_BAD_COLOR, false);
 		} else {
 			for (DiffPiece piece : pieces) {
 				if (piece.typed == null) continue;
@@ -640,7 +640,10 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		// view hidden; this integration no longer needs ANKI_CORRECT/ANKI_WRONG labels.
 		ankiFeedback.setText("");
 		ankiFeedback.setVisibility(View.GONE);
-		ankiAnswer.setText(buildAnswerComparison(ankiSession.typedText, card.answer));
+		ankiAnswer.setText(buildAnswerComparison(
+				ankiSession.typedText,
+				card.answer,
+				ankiSession.neutralFirstExposure));
 		ankiAnswer.setVisibility(View.VISIBLE);
 		ankiRatings.setVisibility(View.VISIBLE);
 
