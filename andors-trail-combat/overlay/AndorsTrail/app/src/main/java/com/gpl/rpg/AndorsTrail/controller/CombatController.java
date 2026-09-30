@@ -8,6 +8,7 @@ import android.os.Message;
 
 import com.gpl.rpg.AndorsTrail.AndorsTrailPreferences;
 import com.gpl.rpg.AndorsTrail.R;
+import com.gpl.rpg.AndorsTrail.anki.AnkiCombatReviewClient;
 import com.gpl.rpg.AndorsTrail.context.ControllerContext;
 import com.gpl.rpg.AndorsTrail.context.WorldContext;
 import com.gpl.rpg.AndorsTrail.controller.VisualEffectController.VisualEffectCompletedCallback;
@@ -45,6 +46,61 @@ public final class CombatController implements VisualEffectCompletedCallback {
 	// A correct quiz answer gives exactly one attack, then hands the turn to the monsters.
 	private boolean quizAttackEndsTurn = false;
 
+	/**
+	 * Retained Anki-combat state. CombatController belongs to the application ControllerContext,
+	 * so this survives Activity/View recreation such as screen rotation.
+	 */
+	public static final class AnkiCombatSession {
+		public enum Phase {
+			IDLE,
+			LOADING,
+			QUESTION,
+			ANSWER,
+			SUBMITTING
+		}
+
+		public Phase phase = Phase.IDLE;
+		public AnkiCombatReviewClient.ReviewCard card = null;
+		public AnkiCombatReviewClient.ReviewCard retryCard = null;
+		public boolean retryActive = false;
+		public boolean typedCorrect = false;
+		public boolean neutralFirstExposure = false;
+		public String typedText = "";
+		public String errorMessage = "";
+		public long operationId = 0L;
+		public long phaseStartedAt = 0L;
+		public int pendingTappedEase = 0;
+		public int pendingEffectiveEase = 0;
+		public boolean pendingShouldAttack = false;
+
+		public void setPhase(Phase newPhase) {
+			phase = newPhase;
+			phaseStartedAt = System.currentTimeMillis();
+		}
+
+		public void resetAttempt() {
+			typedCorrect = false;
+			neutralFirstExposure = false;
+			typedText = "";
+			errorMessage = "";
+			pendingTappedEase = 0;
+			pendingEffectiveEase = 0;
+			pendingShouldAttack = false;
+		}
+
+		public void resetAll() {
+			operationId++;
+			phase = Phase.IDLE;
+			card = null;
+			retryCard = null;
+			retryActive = false;
+			resetAttempt();
+			phaseStartedAt = System.currentTimeMillis();
+		}
+	}
+
+	private final AnkiCombatSession ankiCombatSession = new AnkiCombatSession();
+
 	public CombatController(ControllerContext controllers, WorldContext world) {
 		this.controllers = controllers;
 		this.world = world;
@@ -68,6 +124,16 @@ public final class CombatController implements VisualEffectCompletedCallback {
 	public void enterCombat(BeginTurnAs whoseTurn) {
 		world.model.uiSelections.isInCombat = true;
 		resetCombatState();
+
+		if (whoseTurn != BeginTurnAs.continueLastTurn) {
+			ankiQuizGateActive = false;
+			ankiCombatSession.resetAll();
+		} else if (ankiCombatSession.phase != AnkiCombatSession.Phase.IDLE
+				&& world.model.uiSelections.isPlayersCombatTurn) {
+			// Re-arm the gate after Activity recreation if an unresolved quiz still exists.
+			ankiQuizGateActive = true;
+		}
+
 		combatTurnListeners.onCombatStarted();
 		if (whoseTurn == BeginTurnAs.player) newPlayerTurn(true);
 		else if (whoseTurn == BeginTurnAs.monsters) beginMonsterTurn(true);
@@ -77,6 +143,9 @@ public final class CombatController implements VisualEffectCompletedCallback {
 		exitCombat(pickupLootBags, false);
 	}
 	public void exitCombat(boolean pickupLootBags, boolean canceledCombat) {
+		ankiQuizGateActive = false;
+		quizAttackEndsTurn = false;
+		ankiCombatSession.resetAll();
 		setCombatSelection(null, null);
 		world.model.uiSelections.isInCombat = false;
 		if (pickupLootBags) {
@@ -215,8 +284,25 @@ public final class CombatController implements VisualEffectCompletedCallback {
 
 	private AttackResult lastAttackResult;
 
+	public AnkiCombatSession getAnkiCombatSession() {
+		return ankiCombatSession;
+	}
+
+	public boolean isAnkiQuizGateActive() {
+		return ankiQuizGateActive;
+	}
+
 	public void setAnkiQuizGateActive(boolean active) {
 		this.ankiQuizGateActive = active;
+	}
+
+	/**
+	 * Emergency self-heal used by the UI watchdog. It never submits an Anki review.
+	 */
+	public void resetAnkiQuizAndUnlockCombat() {
+		ankiCombatSession.resetAll();
+		ankiQuizGateActive = false;
+		quizAttackEndsTurn = false;
 	}
 
 	public void skipAnkiQuizTurn() {
@@ -226,8 +312,21 @@ public final class CombatController implements VisualEffectCompletedCallback {
 	}
 
 	public void executeAnkiQuizAttack() {
-		if (!world.model.uiSelections.isPlayersCombatTurn) return;
+		if (!world.model.uiSelections.isInCombat || !world.model.uiSelections.isPlayersCombatTurn) return;
 		ankiQuizGateActive = false;
+
+		if (controllers.effectController.isRunningVisualEffect()) {
+			// A stray animation should not turn a correct answer into a soft-lock.
+			new Handler().postDelayed(this::executeAnkiQuizAttack, 100);
+			return;
+		}
+
+		if (!world.model.player.hasAPs(world.model.player.getAttackCost())) {
+			// If another action consumed AP unexpectedly, resolve the turn instead of leaving
+			// the player with a cleared quiz and an unusable attack.
+			endPlayerTurn();
+			return;
+		}
 
 		if (world.model.uiSelections.selectedMonster == null) {
 			Monster target = getAdjacentAggressiveMonster();
