@@ -145,6 +145,15 @@
         android:visibility="gone">
 
         <TextView
+            android:id="@+id/combatview_anki_previous_rating"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="end"
+            android:paddingRight="4dp"
+            android:textSize="16sp"
+            android:visibility="gone" />
+
+        <TextView
             android:id="@+id/combatview_anki_status"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
