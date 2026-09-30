@@ -15,6 +15,7 @@
 (function () {
     var reported = false;
     var observer = null;
+    var fallbackTimer = null;
 
     function makeMarker(correct) {
         var oldWrong = document.getElementById("anki-wrong-marker");
@@ -36,54 +37,99 @@
         document.body.appendChild(marker);
     }
 
-    function reportResult() {
+    function stopWatching() {
+        if (observer) observer.disconnect();
+        if (fallbackTimer) clearTimeout(fallbackTimer);
+    }
+
+    async function reportToAnkiDroid(api, correct) {
+        if (!api || typeof api.ankiSetTypeAnswerResult !== "function") {
+            console.warn("Typed retry: custom AnkiDroid build is required.");
+            return;
+        }
+
+        try {
+            await api.ankiSetTypeAnswerResult(correct ? "correct" : "wrong");
+        } catch (error) {
+            console.error("Typed retry result report failed:", error);
+        }
+    }
+
+    async function processResult(forceBlankCheck) {
         if (reported) return;
 
         var typeBad = document.querySelector(".typeBad");
         var typeGood = document.querySelector(".typeGood");
+        var typeMissed = document.querySelector(".typeMissed");
 
-        if (!typeBad && !typeGood) return;
+        // SmarterTypeField has produced a comparison when any of these are present.
+        // The forced fallback handles the special blank-answer case where Anki may
+        // leave us with no typeBad/typeGood span at all.
+        if (!typeBad && !typeGood && !typeMissed && !forceBlankCheck) return;
 
-        var correct = !typeBad && !!typeGood;
-        reported = true;
+        var blank = !typeBad && !typeGood;
+        var correct = !blank && !typeBad && !!typeGood;
 
-        if (observer) observer.disconnect();
-
-        makeMarker(correct);
-
+        var api = null;
         try {
-            if (typeof AnkiDroidJS === "undefined") {
-                console.warn("Typed retry: AnkiDroidJS is unavailable.");
-                return;
-            }
-
-            var api = AnkiDroidJS.init({
-                version: "0.0.3",
-                developer: "local typed-retry card"
-            });
-
-            if (typeof api.ankiSetTypeAnswerResult !== "function") {
-                console.warn("Typed retry: custom AnkiDroid build is required.");
-                return;
-            }
-
-            api.ankiSetTypeAnswerResult(correct ? "correct" : "wrong")
-                .catch(function (error) {
-                    console.error("Typed retry result report failed:", error);
+            if (typeof AnkiDroidJS !== "undefined") {
+                api = AnkiDroidJS.init({
+                    version: "0.0.3",
+                    developer: "local typed-retry card"
                 });
+            }
         } catch (error) {
-            console.error("Typed retry setup failed:", error);
+            console.error("Typed retry API setup failed:", error);
         }
+
+        if (blank) {
+            // Blank is allowed only for a card Anki considers never reviewed.
+            // currentCard.reps is still 0 until the first rating is actually recorded.
+            try {
+                if (api && typeof api.ankiGetCardReps === "function") {
+                    var repsResult = await api.ankiGetCardReps();
+                    var reps = Number(repsResult && repsResult.value);
+
+                    if (reps === 0) {
+                        // First exposure to a new/unreviewed card:
+                        // no ANKI_WRONG marker and no retry state.
+                        reported = true;
+                        stopWatching();
+                        return;
+                    }
+                }
+            } catch (error) {
+                console.error("Typed retry card reps check failed:", error);
+            }
+
+            // If the card has been reviewed before (or the reps check fails safely),
+            // an empty answer counts as wrong.
+            correct = false;
+        }
+
+        reported = true;
+        stopWatching();
+        makeMarker(correct);
+        await reportToAnkiDroid(api, correct);
     }
 
-    observer = new MutationObserver(reportResult);
+    observer = new MutationObserver(function () {
+        processResult(false);
+    });
+
     observer.observe(document.documentElement, {
         childList: true,
         subtree: true,
         characterData: true
     });
 
-    reportResult();
+    processResult(false);
+
+    // Preserve the behavior of the old marker script for a truly empty answer,
+    // where there may be no .typeBad/.typeGood nodes to observe.
+    fallbackTimer = setTimeout(function () {
+        processResult(true);
+    }, 250);
 })();
 </script>
 
