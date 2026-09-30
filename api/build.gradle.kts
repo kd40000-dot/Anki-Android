@@ -33,9 +33,9 @@ configure<LibraryExtension> {
             buildConfigField(
                 "String",
                 "READ_WRITE_PERMISSION",
-                "\"com.ichi2.anki.debug.permission.READ_WRITE_DATABASE\"",
+                "\"com.ichi2.anki.retry.permission.READ_WRITE_DATABASE\"",
             )
-            buildConfigField("String", "AUTHORITY", "\"com.ichi2.anki.debug.flashcards\"")
+            buildConfigField("String", "AUTHORITY", "\"com.ichi2.anki.retry.flashcards\"")
         }
         release {
             isMinifyEnabled = false
