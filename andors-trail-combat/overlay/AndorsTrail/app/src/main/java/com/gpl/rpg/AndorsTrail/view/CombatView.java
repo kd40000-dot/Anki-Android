@@ -6,6 +6,10 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 import android.content.res.Resources;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.util.AttributeSet;
 import android.view.View;
 import android.view.ViewGroup;
@@ -68,15 +72,23 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	private final Button ankiHard;
 	private final Button ankiGood;
 	private final Button ankiEasy;
+	private final Button ankiRecover;
 	private final AnkiCombatReviewClient ankiClient = new AnkiCombatReviewClient();
+	private final CombatController.AnkiCombatSession ankiSession;
+	private final Handler ankiMainHandler = new Handler(Looper.getMainLooper());
+	private boolean suppressAnkiTextWatcher = false;
+	private long lastSubmissionProbeOperation = -1L;
 
-	private AnkiCombatReviewClient.ReviewCard currentAnkiCard;
-	private AnkiCombatReviewClient.ReviewCard retryAnkiCard;
-	private boolean ankiRetryActive = false;
-	private boolean typedCorrect = false;
-	private boolean neutralFirstExposure = false;
-	private boolean awaitingRating = false;
-	private boolean loadingAnkiCard = false;
+	private final Runnable ankiHealthCheck = new Runnable() {
+		@Override
+		public void run() {
+			try {
+				runAnkiHealthCheck();
+			} finally {
+				ankiMainHandler.postDelayed(this, 600);
+			}
+		}
+	};
 
 	private final WorldContext world;
 	private final ControllerContext controllers;
@@ -99,6 +111,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		this.world = app.getWorld();
 		this.player = world.model.player;
 		this.controllers = app.getControllerContext();
+		this.ankiSession = controllers.combatController.getAnkiCombatSession();
 		this.preferences = app.getPreferences();
 		this.res = getResources();
 
@@ -164,12 +177,33 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		ankiHard = (Button) findViewById(R.id.combatview_anki_hard);
 		ankiGood = (Button) findViewById(R.id.combatview_anki_good);
 		ankiEasy = (Button) findViewById(R.id.combatview_anki_easy);
+		ankiRecover = (Button) findViewById(R.id.combatview_anki_recover);
 
 		ankiReveal.setOnClickListener((View v) -> revealAnkiAnswer());
 		ankiAgain.setOnClickListener((View v) -> chooseAnkiRating(1));
 		ankiHard.setOnClickListener((View v) -> chooseAnkiRating(2));
 		ankiGood.setOnClickListener((View v) -> chooseAnkiRating(3));
 		ankiEasy.setOnClickListener((View v) -> chooseAnkiRating(4));
+		ankiRecover.setOnClickListener((View v) -> recoverAnkiQuiz());
+
+		ankiInput.addTextChangedListener(new TextWatcher() {
+			@Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+			@Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+				if (!suppressAnkiTextWatcher
+						&& ankiSession.phase == CombatController.AnkiCombatSession.Phase.QUESTION) {
+					ankiSession.typedText = s == null ? "" : s.toString();
+				}
+			}
+			@Override public void afterTextChanged(Editable s) {}
+		});
+
+		ankiInput.setOnEditorActionListener((v, actionId, event) -> {
+			if (ankiSession.phase == CombatController.AnkiCombatSession.Phase.QUESTION) {
+				revealAnkiAnswer();
+				return true;
+			}
+			return false;
+		});
 
 		monsterConditionsButton = (ImageButton) findViewById(R.id.combatview_monsterconditions_button);
 		monsterConditionsButton.setOnClickListener(new OnClickListener() {
@@ -217,84 +251,131 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		});
 	}
 
-	private boolean hasAnkiPermission() {
-		if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true;
-		return getContext().checkSelfPermission(AnkiCombatReviewClient.PERMISSION) == PackageManager.PERMISSION_GRANTED;
+	private boolean sameCard(AnkiCombatReviewClient.ReviewCard a, AnkiCombatReviewClient.ReviewCard b) {
+		return a != null && b != null && a.noteId == b.noteId && a.cardOrd == b.cardOrd;
+	}
+
+	private void beginAnkiQuestion(AnkiCombatReviewClient.ReviewCard card) {
+		ankiSession.card = card;
+		ankiSession.resetAttempt();
+		card.shownAtMs = System.currentTimeMillis();
+		ankiSession.setPhase(CombatController.AnkiCombatSession.Phase.QUESTION);
+		controllers.combatController.setAnkiQuizGateActive(true);
+		syncAnkiUiFromSession(false);
 	}
 
 	private void loadAnkiCardForPlayerTurn() {
 		if (!world.model.uiSelections.isInCombat || !world.model.uiSelections.isPlayersCombatTurn) return;
 
+		if (ankiSession.retryActive && ankiSession.retryCard != null
+				&& ankiSession.phase == CombatController.AnkiCombatSession.Phase.IDLE) {
+			beginAnkiQuestion(ankiSession.retryCard);
+			return;
+		}
+
+		if (ankiSession.phase != CombatController.AnkiCombatSession.Phase.IDLE) {
+			controllers.combatController.setAnkiQuizGateActive(true);
+			syncAnkiUiFromSession(false);
+			return;
+		}
+
+		final long operation = ++ankiSession.operationId;
+		ankiSession.errorMessage = "";
+		ankiSession.setPhase(CombatController.AnkiCombatSession.Phase.LOADING);
+		controllers.combatController.setAnkiQuizGateActive(true);
+		syncAnkiUiFromSession(false);
+
+		final android.content.ContentResolver resolver = getContext().getApplicationContext().getContentResolver();
+		new Thread(() -> {
+			AnkiCombatReviewClient.ReviewCard loaded = null;
+			Exception failure = null;
+			try {
+				loaded = ankiClient.getNextCard(resolver);
+			} catch (Exception e) {
+				failure = e;
+			}
+
+			final AnkiCombatReviewClient.ReviewCard result = loaded;
+			final Exception error = failure;
+			ankiMainHandler.post(() -> {
+				if (operation != ankiSession.operationId
+						|| ankiSession.phase != CombatController.AnkiCombatSession.Phase.LOADING) {
+					return;
+				}
+
+				if (!world.model.uiSelections.isInCombat || !world.model.uiSelections.isPlayersCombatTurn) {
+					ankiSession.setPhase(CombatController.AnkiCombatSession.Phase.IDLE);
+					return;
+				}
+
+				if (error != null) {
+					if (error instanceof SecurityException && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+						try {
+							((Activity) getContext()).requestPermissions(
+									new String[]{AnkiCombatReviewClient.PERMISSION},
+									REQUEST_ANKI_PERMISSION);
+						} catch (Exception ignored) {
+						}
+					}
+					fallbackToNormalCombat("Could not load Anki card: " + error.getMessage());
+					return;
+				}
+
+				if (result == null) {
+					fallbackToNormalCombat("No Anki cards are due.");
+				} else {
+					beginAnkiQuestion(result);
+				}
+			});
+		}, "AnkiCombatCardLoad").start();
+	}
+
+	private void setInputTextWithoutWatcher(String text) {
+		String desired = text == null ? "" : text;
+		if (desired.contentEquals(ankiInput.getText())) return;
+		suppressAnkiTextWatcher = true;
+		ankiInput.setText(desired);
+		ankiInput.setSelection(ankiInput.length());
+		suppressAnkiTextWatcher = false;
+	}
+
+	private void prepareQuizFrame() {
 		controllers.combatController.setAnkiQuizGateActive(true);
 		actionBar.setVisibility(View.GONE);
 		monsterActionText.setVisibility(View.GONE);
 		ankiQuiz.setVisibility(View.VISIBLE);
+		ankiRecover.setVisibility(View.GONE);
+	}
 
-		if (ankiRetryActive && retryAnkiCard != null) {
-			showAnkiCard(retryAnkiCard, true);
-			return;
-		}
-
-		if (!hasAnkiPermission()) {
-			ankiStatus.setText("Allow Andor's Trail to access AnkiDroid cards.");
-			ankiQuestion.setText("");
-			ankiInput.setVisibility(View.GONE);
-			ankiReveal.setVisibility(View.GONE);
-			ankiRatings.setVisibility(View.GONE);
-			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-				((Activity) getContext()).requestPermissions(
-						new String[]{AnkiCombatReviewClient.PERMISSION},
-						REQUEST_ANKI_PERMISSION);
-			}
-			return;
-		}
-
-		if (loadingAnkiCard) return;
-		loadingAnkiCard = true;
-		ankiStatus.setText("Loading Anki card...");
+	private void renderLoadingState() {
+		prepareQuizFrame();
+		ankiStatus.setText(ankiSession.errorMessage.isEmpty() ? "Loading Anki card…" : ankiSession.errorMessage);
 		ankiQuestion.setText("");
 		ankiInput.setVisibility(View.GONE);
 		ankiReveal.setVisibility(View.GONE);
 		ankiFeedback.setVisibility(View.GONE);
 		ankiAnswer.setVisibility(View.GONE);
 		ankiRatings.setVisibility(View.GONE);
-
-		new Thread(() -> {
-			try {
-				AnkiCombatReviewClient.ReviewCard card =
-						ankiClient.getNextCard(getContext().getContentResolver());
-				post(() -> {
-					loadingAnkiCard = false;
-					if (!world.model.uiSelections.isInCombat || !world.model.uiSelections.isPlayersCombatTurn) return;
-					if (card == null) {
-						fallbackToNormalCombat("No Anki cards are due.");
-					} else {
-						showAnkiCard(card, false);
-					}
-				});
-			} catch (Exception e) {
-				post(() -> {
-					loadingAnkiCard = false;
-					fallbackToNormalCombat("Could not load Anki card: " + e.getMessage());
-				});
-			}
-		}).start();
+		if (!ankiSession.errorMessage.isEmpty()
+				|| System.currentTimeMillis() - ankiSession.phaseStartedAt > 5000) {
+			ankiRecover.setVisibility(View.VISIBLE);
+		}
 	}
 
-	private void showAnkiCard(AnkiCombatReviewClient.ReviewCard card, boolean retry) {
-		currentAnkiCard = card;
-		card.shownAtMs = System.currentTimeMillis();
-		typedCorrect = false;
-		neutralFirstExposure = false;
-		awaitingRating = false;
+	private void renderQuestionState() {
+		AnkiCombatReviewClient.ReviewCard card = ankiSession.card;
+		if (card == null) {
+			ankiSession.setPhase(CombatController.AnkiCombatSession.Phase.IDLE);
+			loadAnkiCardForPlayerTurn();
+			return;
+		}
 
-		controllers.combatController.setAnkiQuizGateActive(true);
-		actionBar.setVisibility(View.GONE);
-		monsterActionText.setVisibility(View.GONE);
-		ankiQuiz.setVisibility(View.VISIBLE);
-		ankiStatus.setText(retry ? "Retry: get it right to attack. Any rating will record Again." : "Anki combat");
+		prepareQuizFrame();
+		ankiStatus.setText(ankiSession.retryActive && sameCard(ankiSession.retryCard, card)
+				? "Retry: get it right to attack. Any rating after a correct retry records Again."
+				: "Anki combat");
 		ankiQuestion.setText(card.question);
-		ankiInput.setText("");
+		setInputTextWithoutWatcher(ankiSession.typedText);
 		ankiInput.setEnabled(true);
 		ankiInput.setVisibility(View.VISIBLE);
 		ankiReveal.setEnabled(true);
@@ -302,11 +383,108 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		ankiFeedback.setVisibility(View.GONE);
 		ankiAnswer.setVisibility(View.GONE);
 		ankiRatings.setVisibility(View.GONE);
+		setRatingButtonsEnabled(true);
 
 		setRatingLabel(ankiAgain, "Again", card.nextIntervals, 0);
 		setRatingLabel(ankiHard, "Hard", card.nextIntervals, 1);
 		setRatingLabel(ankiGood, "Good", card.nextIntervals, 2);
 		setRatingLabel(ankiEasy, "Easy", card.nextIntervals, 3);
+
+		if (!ankiSession.errorMessage.isEmpty()) {
+			ankiStatus.setText(ankiSession.errorMessage);
+			ankiRecover.setVisibility(View.VISIBLE);
+		}
+	}
+
+	private void renderAnswerState(boolean submitting) {
+		AnkiCombatReviewClient.ReviewCard card = ankiSession.card;
+		if (card == null) {
+			ankiSession.setPhase(CombatController.AnkiCombatSession.Phase.IDLE);
+			loadAnkiCardForPlayerTurn();
+			return;
+		}
+
+		prepareQuizFrame();
+		ankiQuestion.setText(card.question);
+		setInputTextWithoutWatcher(ankiSession.typedText);
+		ankiInput.setEnabled(false);
+		ankiInput.setVisibility(View.VISIBLE);
+		ankiReveal.setVisibility(View.GONE);
+
+		if (ankiSession.neutralFirstExposure) {
+			ankiFeedback.setText("First exposure — blank answer is not marked wrong. No attack this turn.");
+		} else if (ankiSession.typedCorrect) {
+			ankiFeedback.setText("ANKI_CORRECT — choose a rating to attack.");
+		} else {
+			ankiFeedback.setText("ANKI_WRONG — choose a rating. Your turn will be skipped.");
+		}
+
+		ankiFeedback.setVisibility(View.VISIBLE);
+		ankiAnswer.setText("Answer: " + card.answer);
+		ankiAnswer.setVisibility(View.VISIBLE);
+		ankiRatings.setVisibility(View.VISIBLE);
+
+		setRatingLabel(ankiAgain, "Again", card.nextIntervals, 0);
+		setRatingLabel(ankiHard, "Hard", card.nextIntervals, 1);
+		setRatingLabel(ankiGood, "Good", card.nextIntervals, 2);
+		setRatingLabel(ankiEasy, "Easy", card.nextIntervals, 3);
+
+		setRatingButtonsEnabled(!submitting);
+
+		if (submitting) {
+			String tapped = ratingName(ankiSession.pendingTappedEase);
+			String effective = ratingName(ankiSession.pendingEffectiveEase);
+			ankiStatus.setText(ankiSession.pendingTappedEase != ankiSession.pendingEffectiveEase
+					? "Saving " + effective + " (you tapped " + tapped + ")…"
+					: "Saving " + effective + "…");
+			if (System.currentTimeMillis() - ankiSession.phaseStartedAt > 8000) {
+				ankiRecover.setVisibility(View.VISIBLE);
+			}
+		} else if (!ankiSession.errorMessage.isEmpty()) {
+			ankiStatus.setText(ankiSession.errorMessage);
+			ankiRecover.setVisibility(View.VISIBLE);
+		} else if (ankiSession.retryActive && sameCard(ankiSession.retryCard, card)) {
+			ankiStatus.setText(ankiSession.typedCorrect
+					? "Correct retry: every button will be recorded as Again."
+					: "Retry attempt");
+		} else {
+			ankiStatus.setText("Anki combat");
+		}
+	}
+
+	private void syncAnkiUiFromSession(boolean allowLoad) {
+		if (!isAttachedToWindow()) return;
+
+		if (!world.model.uiSelections.isInCombat) {
+			ankiQuiz.setVisibility(View.GONE);
+			return;
+		}
+
+		if (!world.model.uiSelections.isPlayersCombatTurn) {
+			ankiQuiz.setVisibility(View.GONE);
+			return;
+		}
+
+		switch (ankiSession.phase) {
+			case IDLE:
+				controllers.combatController.setAnkiQuizGateActive(false);
+				ankiQuiz.setVisibility(View.GONE);
+				actionBar.setVisibility(View.VISIBLE);
+				if (allowLoad) loadAnkiCardForPlayerTurn();
+				break;
+			case LOADING:
+				renderLoadingState();
+				break;
+			case QUESTION:
+				renderQuestionState();
+				break;
+			case ANSWER:
+				renderAnswerState(false);
+				break;
+			case SUBMITTING:
+				renderAnswerState(true);
+				break;
+		}
 	}
 
 	private void setRatingLabel(Button button, String name, String[] intervals, int index) {
@@ -315,30 +493,20 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	}
 
 	private void revealAnkiAnswer() {
-		if (currentAnkiCard == null || awaitingRating) return;
+		if (ankiSession.phase != CombatController.AnkiCombatSession.Phase.QUESTION
+				|| ankiSession.card == null) return;
 
-		String typed = ankiInput.getText().toString();
-		boolean retry = ankiRetryActive && retryAnkiCard == currentAnkiCard;
+		ankiSession.typedText = ankiInput.getText().toString();
+		boolean retry = ankiSession.retryActive && sameCard(ankiSession.retryCard, ankiSession.card);
 
-		// Preserve the user's "blank is not ANKI_WRONG on first-ever exposure" rule.
-		neutralFirstExposure = !retry && currentAnkiCard.reps == 0 && typed.trim().isEmpty();
-		typedCorrect = !neutralFirstExposure && ankiClient.isCorrect(typed, currentAnkiCard.answer);
-		awaitingRating = true;
-
-		if (neutralFirstExposure) {
-			ankiFeedback.setText("First exposure — blank answer is not marked wrong. No attack this turn.");
-		} else if (typedCorrect) {
-			ankiFeedback.setText("Correct — choose a rating to attack.");
-		} else {
-			ankiFeedback.setText("Incorrect — choose a rating. Your turn will be skipped.");
-		}
-
-		ankiAnswer.setText("Answer: " + currentAnkiCard.answer);
-		ankiInput.setEnabled(false);
-		ankiReveal.setVisibility(View.GONE);
-		ankiFeedback.setVisibility(View.VISIBLE);
-		ankiAnswer.setVisibility(View.VISIBLE);
-		ankiRatings.setVisibility(View.VISIBLE);
+		ankiSession.neutralFirstExposure =
+				!retry && ankiSession.card.reps == 0 && ankiSession.typedText.trim().isEmpty();
+		ankiSession.typedCorrect =
+				!ankiSession.neutralFirstExposure
+						&& ankiClient.isCorrect(ankiSession.typedText, ankiSession.card.answer);
+		ankiSession.errorMessage = "";
+		ankiSession.setPhase(CombatController.AnkiCombatSession.Phase.ANSWER);
+		syncAnkiUiFromSession(false);
 	}
 
 	private void setRatingButtonsEnabled(boolean enabled) {
@@ -349,61 +517,77 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	}
 
 	private void chooseAnkiRating(int tappedEase) {
-		if (!awaitingRating || currentAnkiCard == null) return;
+		if (ankiSession.phase != CombatController.AnkiCombatSession.Phase.ANSWER
+				|| ankiSession.card == null) return;
 
-		final AnkiCombatReviewClient.ReviewCard card = currentAnkiCard;
-		final boolean retry = ankiRetryActive && retryAnkiCard == card;
-		final boolean wasCorrect = typedCorrect;
-		final boolean wasNeutral = neutralFirstExposure;
+		final AnkiCombatReviewClient.ReviewCard card = ankiSession.card;
+		final boolean retry = ankiSession.retryActive && sameCard(ankiSession.retryCard, card);
+		final boolean wasCorrect = ankiSession.typedCorrect;
+		final boolean wasNeutral = ankiSession.neutralFirstExposure;
 
-		// Wrong + Again means "retry next player turn". Do not write anything to Anki yet,
-		// which guarantees the eventual card review produces only one scheduler entry.
 		if (!wasNeutral && !wasCorrect && tappedEase == 1) {
-			ankiRetryActive = true;
-			retryAnkiCard = card;
-			awaitingRating = false;
-			currentAnkiCard = null;
-			ankiStatus.setText("Again selected — retry this card next turn.");
+			ankiSession.retryActive = true;
+			ankiSession.retryCard = card;
+			ankiSession.card = null;
+			ankiSession.operationId++;
+			ankiSession.resetAttempt();
+			ankiSession.setPhase(CombatController.AnkiCombatSession.Phase.IDLE);
 			controllers.combatController.skipAnkiQuizTurn();
 			return;
 		}
 
 		final int effectiveEase = (wasCorrect && retry) ? 1 : tappedEase;
-		setRatingButtonsEnabled(false);
-		ankiStatus.setText(effectiveEase != tappedEase
-				? "Recording " + ratingName(effectiveEase) + " (you tapped " + ratingName(tappedEase) + ")..."
-				: "Recording " + ratingName(effectiveEase) + "...");
+		final long operation = ++ankiSession.operationId;
+		ankiSession.pendingTappedEase = tappedEase;
+		ankiSession.pendingEffectiveEase = effectiveEase;
+		ankiSession.pendingShouldAttack = wasCorrect;
+		ankiSession.errorMessage = "";
+		ankiSession.setPhase(CombatController.AnkiCombatSession.Phase.SUBMITTING);
+		lastSubmissionProbeOperation = -1L;
+		syncAnkiUiFromSession(false);
 
+		final android.content.ContentResolver resolver = getContext().getApplicationContext().getContentResolver();
 		new Thread(() -> {
+			boolean saved = false;
+			Exception failure = null;
 			try {
-				boolean saved = ankiClient.answerCard(getContext().getContentResolver(), card, effectiveEase);
-				post(() -> {
-					if (!saved) {
-						setRatingButtonsEnabled(true);
-						ankiStatus.setText("AnkiDroid did not accept the rating. Try again.");
-						return;
-					}
-
-					if (retry || (!wasCorrect && tappedEase != 1)) {
-						ankiRetryActive = false;
-						retryAnkiCard = null;
-					}
-					currentAnkiCard = null;
-					awaitingRating = false;
-
-					if (wasCorrect) {
-						controllers.combatController.executeAnkiQuizAttack();
-					} else {
-						controllers.combatController.skipAnkiQuizTurn();
-					}
-				});
+				saved = ankiClient.answerCard(resolver, card, effectiveEase);
 			} catch (Exception e) {
-				post(() -> {
-					setRatingButtonsEnabled(true);
-					ankiStatus.setText("Could not save rating: " + e.getMessage());
-				});
+				failure = e;
 			}
-		}).start();
+
+			final boolean success = saved;
+			final Exception error = failure;
+			ankiMainHandler.post(() -> {
+				if (operation != ankiSession.operationId
+						|| ankiSession.phase != CombatController.AnkiCombatSession.Phase.SUBMITTING) {
+					return;
+				}
+
+				if (success) {
+					finishSubmittedReview(operation);
+				} else {
+					ankiSession.errorMessage = error == null
+							? "AnkiDroid did not accept the rating. You can tap a rating again."
+							: "Could not save rating: " + error.getMessage();
+					ankiSession.setPhase(CombatController.AnkiCombatSession.Phase.ANSWER);
+					syncAnkiUiFromSession(false);
+				}
+			});
+		}, "AnkiCombatRatingSave").start();
+	}
+
+	private void finishSubmittedReview(long operation) {
+		if (operation != ankiSession.operationId) return;
+		boolean shouldAttack = ankiSession.pendingShouldAttack;
+		ankiSession.resetAll();
+
+		if (!world.model.uiSelections.isInCombat) return;
+		if (shouldAttack) {
+			controllers.combatController.executeAnkiQuizAttack();
+		} else if (world.model.uiSelections.isPlayersCombatTurn) {
+			controllers.combatController.skipAnkiQuizTurn();
+		}
 	}
 
 	private String ratingName(int ease) {
@@ -416,12 +600,106 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		}
 	}
 
+	private void probeStalledSubmission() {
+		if (ankiSession.phase != CombatController.AnkiCombatSession.Phase.SUBMITTING
+				|| ankiSession.card == null) return;
+
+		final long operation = ankiSession.operationId;
+		if (lastSubmissionProbeOperation == operation) return;
+		lastSubmissionProbeOperation = operation;
+		final AnkiCombatReviewClient.ReviewCard card = ankiSession.card;
+		final android.content.ContentResolver resolver = getContext().getApplicationContext().getContentResolver();
+
+		new Thread(() -> {
+			int reps = -1;
+			try {
+				reps = ankiClient.getCardReps(resolver, card);
+			} catch (Exception ignored) {
+			}
+			final int currentReps = reps;
+			ankiMainHandler.post(() -> {
+				if (operation != ankiSession.operationId
+						|| ankiSession.phase != CombatController.AnkiCombatSession.Phase.SUBMITTING) {
+					return;
+				}
+
+				if (currentReps > card.reps) {
+					finishSubmittedReview(operation);
+				} else if (currentReps >= 0) {
+					// We could verify that the review was not committed, so make the UI usable again.
+					ankiSession.operationId++;
+					ankiSession.errorMessage = "The rating save timed out and was not recorded. Please choose a rating again.";
+					ankiSession.setPhase(CombatController.AnkiCombatSession.Phase.ANSWER);
+					syncAnkiUiFromSession(false);
+				} else {
+					ankiSession.errorMessage = "Still waiting for AnkiDroid. Tap Recover quiz to check again.";
+					lastSubmissionProbeOperation = -1L;
+					syncAnkiUiFromSession(false);
+				}
+			});
+		}, "AnkiCombatRatingProbe").start();
+	}
+
+	private void recoverAnkiQuiz() {
+		if (!world.model.uiSelections.isInCombat || !world.model.uiSelections.isPlayersCombatTurn) return;
+
+		if (ankiSession.phase == CombatController.AnkiCombatSession.Phase.SUBMITTING) {
+			lastSubmissionProbeOperation = -1L;
+			probeStalledSubmission();
+			return;
+		}
+
+		if (ankiSession.phase == CombatController.AnkiCombatSession.Phase.LOADING) {
+			ankiSession.operationId++;
+			ankiSession.errorMessage = "";
+			ankiSession.setPhase(CombatController.AnkiCombatSession.Phase.IDLE);
+			loadAnkiCardForPlayerTurn();
+			return;
+		}
+
+		if (ankiSession.phase == CombatController.AnkiCombatSession.Phase.IDLE) {
+			loadAnkiCardForPlayerTurn();
+		} else {
+			syncAnkiUiFromSession(false);
+		}
+	}
+
+	private void runAnkiHealthCheck() {
+		if (!isAttachedToWindow()) return;
+
+		if (!world.model.uiSelections.isInCombat || !world.model.uiSelections.isPlayersCombatTurn) {
+			return;
+		}
+
+		long age = System.currentTimeMillis() - ankiSession.phaseStartedAt;
+
+		if (ankiSession.phase == CombatController.AnkiCombatSession.Phase.IDLE) {
+			loadAnkiCardForPlayerTurn();
+			return;
+		}
+
+		if (ankiSession.phase == CombatController.AnkiCombatSession.Phase.LOADING && age > 12000) {
+			// Card loading is read-only, so invalidating and retrying it is safe.
+			ankiSession.operationId++;
+			ankiSession.errorMessage = "Card loading stalled; retrying…";
+			ankiSession.setPhase(CombatController.AnkiCombatSession.Phase.IDLE);
+			loadAnkiCardForPlayerTurn();
+			return;
+		}
+
+		if (ankiSession.phase == CombatController.AnkiCombatSession.Phase.SUBMITTING && age > 15000) {
+			probeStalledSubmission();
+		}
+
+		// This also restores a panel that disappeared because of rotation or another UI action.
+		syncAnkiUiFromSession(false);
+	}
+
 	private void fallbackToNormalCombat(String message) {
-		currentAnkiCard = null;
-		awaitingRating = false;
-		controllers.combatController.setAnkiQuizGateActive(false);
+		controllers.combatController.resetAnkiQuizAndUnlockCombat();
 		ankiQuiz.setVisibility(View.GONE);
 		actionBar.setVisibility(View.VISIBLE);
+		setRatingButtonsEnabled(true);
 		if (message != null && !message.isEmpty()) {
 			Toast.makeText(getContext(), message + " Normal combat enabled.", Toast.LENGTH_LONG).show();
 		}
@@ -429,11 +707,11 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 
 	public void onAnkiPermissionResult(boolean granted) {
 		if (!world.model.uiSelections.isInCombat || !world.model.uiSelections.isPlayersCombatTurn) return;
-		if (granted) {
-			loadAnkiCardForPlayerTurn();
-		} else {
-			fallbackToNormalCombat("AnkiDroid permission was denied.");
-		}
+		// The custom AnkiDroid build also has a package allowlist, so try the provider again
+		// even if Android's custom-permission dialog reports an unexpected result.
+		ankiSession.operationId++;
+		ankiSession.setPhase(CombatController.AnkiCombatSession.Phase.IDLE);
+		loadAnkiCardForPlayerTurn();
 	}
 
 	private void toggleConditionsBarVisibility() {
@@ -449,7 +727,10 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 			monsterActionText.setVisibility(View.VISIBLE);
 			monsterActionText.setText(res.getString(R.string.combat_monsteraction, currentActiveMonster.getName()));
 		} else {
-			actionBar.setVisibility(View.VISIBLE);
+			actionBar.setVisibility(
+					ankiSession.phase == CombatController.AnkiCombatSession.Phase.IDLE
+							? View.VISIBLE
+							: View.GONE);
 			monsterActionText.setVisibility(View.GONE);
 		}
 	}
@@ -553,6 +834,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	public void updateStatus() {
 		updatePlayerAP();
 		updateSelectedMonster(world.model.uiSelections.selectedMonster);
+		syncAnkiUiFromSession(false);
 	}
 
 	private void show() {
@@ -578,8 +860,12 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		controllers.actorStatsController.actorStatsListeners.add(this);
 		controllers.actorStatsController.actorConditionListeners.add(this);
 		activeConditions.subscribe();
+		ankiMainHandler.removeCallbacks(ankiHealthCheck);
+		ankiMainHandler.post(ankiHealthCheck);
+		syncAnkiUiFromSession(true);
 	}
 	public void unsubscribe() {
+		ankiMainHandler.removeCallbacks(ankiHealthCheck);
 		controllers.actorStatsController.actorStatsListeners.remove(this);
 		controllers.combatController.combatTurnListeners.remove(this);
 		controllers.combatController.combatSelectionListeners.remove(this);
@@ -606,16 +892,13 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	public void onCombatStarted() {
 		show();
 		updateTurnInfo(null);
+		syncAnkiUiFromSession(true);
 	}
 
 	@Override
 	public void onCombatEnded() {
-		controllers.combatController.setAnkiQuizGateActive(false);
 		ankiQuiz.setVisibility(View.GONE);
-		currentAnkiCard = null;
-		retryAnkiCard = null;
-		ankiRetryActive = false;
-		awaitingRating = false;
+		setRatingButtonsEnabled(true);
 		hide();
 	}
 
