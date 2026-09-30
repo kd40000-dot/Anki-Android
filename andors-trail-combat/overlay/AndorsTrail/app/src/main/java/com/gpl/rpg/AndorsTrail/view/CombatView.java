@@ -194,6 +194,8 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 
 		ankiFlee.setOnClickListener((View v) -> {
 			hideAnkiKeyboardAndClearFocus();
+			ankiQuiz.setVisibility(View.GONE);
+			actionBar.setVisibility(View.VISIBLE);
 			controllers.combatController.startFlee();
 			MainView mv = ((MainActivity) getContext()).getMainView();
 			mv.post(mv::requestFocus);
@@ -1149,6 +1151,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	}
 
 	private void hide() {
+		hideAnkiKeyboardAndClearFocus();
 		if (preferences.enableUiAnimations) {
 			startAnimation(hideAnimation);
 		} else {
@@ -1222,6 +1225,10 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	@Override
 	public void onActorHealthChanged(Actor actor) {
 		if (actor == currentMonster) updateMonsterHealth(currentMonster);
+		if (actor == player && player.isDead()) {
+			ankiQuiz.setVisibility(View.GONE);
+			hideAnkiKeyboardAndClearFocus();
+		}
 	}
 
 	@Override
