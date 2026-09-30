@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<manifest 
+	xmlns:android="http://schemas.android.com/apk/res/android" 
+	android:versionCode="89"
+	android:versionName="0.8.18"
+	android:installLocation="auto"
+	>
+
+	<supports-screens
+		android:smallScreens="true" 
+		android:normalScreens="true"
+		android:largeScreens="true"
+		android:xlargeScreens="true"
+		android:anyDensity="true"
+		/>
+
+	<!-- Storage access permissions - keep for Android 12 and below -->
+	<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+	<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+	<!-- Custom AnkiDroid build used by the combat study integration -->
+	<uses-permission android:name="com.ichi2.anki.retry.permission.READ_WRITE_DATABASE" />
+
+	<uses-feature android:name="android.software.leanback" android:required="false"/>
+	<uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
+
+	<queries>
+		<intent>
+			<action android:name="android.intent.action.OPEN_DOCUMENT_TREE" />
+		</intent>
+		<provider android:authorities="com.ichi2.anki.retry.flashcards" />
+	</queries>
+
+	<application
+		android:name="com.gpl.rpg.AndorsTrail.AndorsTrailApplication"
+		android:label="@string/app_name"
+		android:icon="@drawable/${icon_name}"
+		android:isGame="true"
+		android:banner="@drawable/tv_banner"
+		android:description="@string/app_description"
+        android:allowBackup="true"
+        android:theme="@style/AndorsTrailTheme_Blue"
+		android:requestLegacyExternalStorage="true"
+		android:hasFragileUserData="true"
+		android:preserveLegacyExternalStorage="true"
+		>
+		<activity
+			android:exported="true"
+		    android:name="com.gpl.rpg.AndorsTrail.activity.StartScreenActivity"
+		    android:clearTaskOnLaunch="true"
+		    >
+			<intent-filter>
+				<action android:name="android.intent.action.MAIN" />
+				<category android:name="android.intent.category.LAUNCHER" />
+				<category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+			</intent-filter>
+		</activity>
+   		<activity 
+			android:name="com.gpl.rpg.AndorsTrail.activity.MainActivity"
+			android:theme="@style/AndorsTrailTheme_Blue.NoBackground"
+			/>
+		<activity android:name="com.gpl.rpg.AndorsTrail.activity.HeroinfoActivity" />
+		<activity android:name="com.gpl.rpg.AndorsTrail.activity.MonsterInfoActivity" android:theme="@style/AndorsTrailDialogTheme_Blue" />
+		<activity android:name="com.gpl.rpg.AndorsTrail.activity.ItemInfoActivity" android:theme="@style/AndorsTrailDialogTheme_Blue" />
+		<activity android:name="com.gpl.rpg.AndorsTrail.activity.LevelUpActivity" android:theme="@style/AndorsTrailDialogTheme_Blue" />
+		<activity android:name="com.gpl.rpg.AndorsTrail.activity.MonsterEncounterActivity" android:theme="@style/AndorsTrailDialogTheme_Blue" />
+		<activity android:name="com.gpl.rpg.AndorsTrail.activity.ConversationActivity" android:theme="@style/AndorsTrailDialogTheme_Blue" />
+		<activity android:name="com.gpl.rpg.AndorsTrail.activity.ShopActivity" />
+		<activity android:name="com.gpl.rpg.AndorsTrail.activity.AboutActivity" />
+		<activity android:name="com.gpl.rpg.AndorsTrail.activity.LoadingActivity" />
+		<activity android:name="com.gpl.rpg.AndorsTrail.activity.Preferences" />
+		<activity android:name="com.gpl.rpg.AndorsTrail.activity.LoadSaveActivity" android:theme="@style/AndorsTrailDialogTheme_Blue" />
+		<activity android:name="com.gpl.rpg.AndorsTrail.activity.ActorConditionInfoActivity" android:theme="@style/AndorsTrailDialogTheme_Blue" />
+		<activity android:name="com.gpl.rpg.AndorsTrail.activity.BulkSelectionInterface" android:theme="@style/AndorsTrailDialogTheme_Blue" />
+		<activity android:name="com.gpl.rpg.AndorsTrail.activity.SkillInfoActivity" android:theme="@style/AndorsTrailDialogTheme_Blue" />
+		<activity android:name="com.gpl.rpg.AndorsTrail.activity.DisplayWorldMapActivity" />
+
+        <provider
+        android:name="androidx.core.content.FileProvider"
+        android:authorities="${applicationId}.fileprovider"
+        android:grantUriPermissions="true"
+        android:exported="false">
+        <meta-data
+            android:name="android.support.FILE_PROVIDER_PATHS"
+            android:resource="@xml/fileprovider" />
+		</provider>
+	</application>
+	
+</manifest>
