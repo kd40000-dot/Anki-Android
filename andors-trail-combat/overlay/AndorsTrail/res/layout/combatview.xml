@@ -155,9 +155,11 @@
             android:id="@+id/combatview_anki_question"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingTop="6dp"
-            android:paddingBottom="6dp"
-            android:textIsSelectable="true" />
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:textIsSelectable="true"
+            android:textSize="18sp"
+            android:textStyle="bold" />
 
         <EditText
             android:id="@+id/combatview_anki_input"
@@ -165,7 +167,8 @@
             android:layout_height="wrap_content"
             android:hint="Type answer"
             android:inputType="text"
-            android:singleLine="true" />
+            android:singleLine="true"
+            android:textSize="18sp" />
 
         <Button
             android:id="@+id/combatview_anki_reveal"
@@ -184,11 +187,15 @@
 
         <TextView
             android:id="@+id/combatview_anki_answer"
+            style="@style/AndorsTrail_Style_LightFrame"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingTop="6dp"
-            android:paddingBottom="6dp"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="8dp"
+            android:lineSpacingExtra="3dp"
+            android:padding="10dp"
             android:textIsSelectable="true"
+            android:textSize="22sp"
             android:visibility="gone" />
 
         <Button
