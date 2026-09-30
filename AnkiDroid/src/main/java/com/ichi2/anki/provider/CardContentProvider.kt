@@ -1461,12 +1461,21 @@ class CardContentProvider : ContentProvider() {
         return String.format(format, javaClass.simpleName, methodName, path, callingPackage)
     }
 
-    private fun hasReadWritePermission(): Boolean =
-        if (BuildConfig.DEBUG) { // Allow self-calling of the provider only in debug builds (e.g. for unit tests)
+    private fun hasReadWritePermission(): Boolean {
+        // Personal debug integration: allow the Andor's Trail debug build to use this
+        // custom AnkiDroid review provider directly. Android's runtime handling of this
+        // custom dangerous permission is unreliable across devices, so keep the bypass
+        // narrowly scoped to this exact package and only in debug builds.
+        if (BuildConfig.DEBUG && callingPackage == "com.gpl.rpg.AndorsTrail.dev") {
+            return true
+        }
+
+        return if (BuildConfig.DEBUG) { // Allow self-calling of the provider only in debug builds (e.g. for unit tests)
             context!!.checkCallingOrSelfPermission(FlashCardsContract.READ_WRITE_PERMISSION) == PackageManager.PERMISSION_GRANTED
         } else {
             context!!.checkCallingPermission(FlashCardsContract.READ_WRITE_PERMISSION) == PackageManager.PERMISSION_GRANTED
         }
+    }
 
     /** Returns true if the calling package is known to be "rogue" and should be blocked.
      * Calling package might be rogue if it has not declared #READ_WRITE_PERMISSION in its manifest */
