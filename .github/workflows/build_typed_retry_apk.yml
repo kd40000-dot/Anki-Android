@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - chatgpt/typed-retry-rating
+      - chatgpt/typed-retry-andors-provider
   workflow_dispatch:
 
 permissions:
