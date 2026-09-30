@@ -170,9 +170,11 @@ android {
     }
     buildTypes {
         named('debug') {
-            versionNameSuffix "-debug"
+            versionNameSuffix "-typed-retry"
             debuggable true
-            applicationIdSuffix ".debug"
+            applicationIdSuffix ".retry"
+            signingConfig = signingConfigs.release
+            resValue "string", "app_name", "AnkiDroid Retry"
             splits.abi.universalApk = true // Build universal APK for debug always
             // Check Crash Reports page on developer wiki for info on ACRA testing
             // buildConfigField "String", "ACRA_URL", '"https://918f7f55-f238-436c-b34f-c8b5f1331fe5-bluemix.cloudant.com/acra-ankidroid/_design/acra-storage/_update/report"'
@@ -195,6 +197,9 @@ android {
             } else {
                 testCoverageEnabled true
             }
+
+            // Keep this custom test build fast and stable for repeated iteration.
+            testCoverageEnabled false
 
             // make the icon red if in debug mode
             resValue 'color', 'anki_foreground_icon_color_0', "#FFFF0000"
