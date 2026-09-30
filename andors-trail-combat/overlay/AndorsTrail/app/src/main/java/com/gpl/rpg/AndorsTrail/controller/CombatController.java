@@ -852,6 +852,7 @@ public final class CombatController implements VisualEffectCompletedCallback {
 			// Fleeing is an explicit escape from the unresolved quiz. Do not submit
 			// any Anki review; just discard the in-combat attempt and unlock combat.
 			ankiCombatSession.resetAll();
+			ankiCombatSession.bypassForCurrentTurn = true;
 			ankiQuizGateActive = false;
 			quizAttackEndsTurn = false;
 		}
