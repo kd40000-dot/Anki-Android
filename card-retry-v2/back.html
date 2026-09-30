@@ -11,11 +11,17 @@
 </details>
 <br>
 
+<script
+  role="smarterTypeField"
+  src="_smarterTypeField.min2026-04-21_00-21-15.js"
+  data-config="2026-09-03_11-47-57">
+</script>
+
 <script>
 (function () {
     var reported = false;
     var observer = null;
-    var fallbackTimer = null;
+    var settleTimer = null;
 
     function makeMarker(correct) {
         var oldWrong = document.getElementById("anki-wrong-marker");
@@ -39,7 +45,7 @@
 
     function stopWatching() {
         if (observer) observer.disconnect();
-        if (fallbackTimer) clearTimeout(fallbackTimer);
+        if (settleTimer) clearTimeout(settleTimer);
     }
 
     async function reportToAnkiDroid(api, correct) {
@@ -55,18 +61,13 @@
         }
     }
 
-    async function processResult(forceBlankCheck) {
+    async function processSettledResult() {
         if (reported) return;
 
         var typeBad = document.querySelector(".typeBad");
         var typeGood = document.querySelector(".typeGood");
-        var typeMissed = document.querySelector(".typeMissed");
 
-        // SmarterTypeField has produced a comparison when any of these are present.
-        // The forced fallback handles the special blank-answer case where Anki may
-        // leave us with no typeBad/typeGood span at all.
-        if (!typeBad && !typeGood && !typeMissed && !forceBlankCheck) return;
-
+        // This is the same blank/no-answer condition your original marker logic used.
         var blank = !typeBad && !typeGood;
         var correct = !blank && !typeBad && !!typeGood;
 
@@ -83,16 +84,15 @@
         }
 
         if (blank) {
-            // Blank is allowed only for a card Anki considers never reviewed.
-            // currentCard.reps is still 0 until the first rating is actually recorded.
+            // Exempt only cards Anki still considers never reviewed.
+            // A new card has reps == 0 until its first rating is recorded.
             try {
                 if (api && typeof api.ankiGetCardReps === "function") {
                     var repsResult = await api.ankiGetCardReps();
                     var reps = Number(repsResult && repsResult.value);
 
                     if (reps === 0) {
-                        // First exposure to a new/unreviewed card:
-                        // no ANKI_WRONG marker and no retry state.
+                        // First exposure: no ANKI_WRONG marker and no retry state.
                         reported = true;
                         stopWatching();
                         return;
@@ -102,8 +102,7 @@
                 console.error("Typed retry card reps check failed:", error);
             }
 
-            // If the card has been reviewed before (or the reps check fails safely),
-            // an empty answer counts as wrong.
+            // Previously reviewed card + blank answer = wrong.
             correct = false;
         }
 
@@ -113,8 +112,16 @@
         await reportToAnkiDroid(api, correct);
     }
 
+    function scheduleResultCheck(delay) {
+        if (reported) return;
+        if (settleTimer) clearTimeout(settleTimer);
+        settleTimer = setTimeout(processSettledResult, delay);
+    }
+
+    // SmarterTypeField can update the type-answer markup asynchronously after
+    // loading its config. Wait until those DOM changes have settled.
     observer = new MutationObserver(function () {
-        processResult(false);
+        scheduleResultCheck(120);
     });
 
     observer.observe(document.documentElement, {
@@ -123,18 +130,7 @@
         characterData: true
     });
 
-    processResult(false);
-
-    // Preserve the behavior of the old marker script for a truly empty answer,
-    // where there may be no .typeBad/.typeGood nodes to observe.
-    fallbackTimer = setTimeout(function () {
-        processResult(true);
-    }, 250);
+    // Also handles a truly blank answer where there may be no later DOM mutation.
+    scheduleResultCheck(350);
 })();
-</script>
-
-<script
-  role="smarterTypeField"
-  src="_smarterTypeField.min2026-04-21_00-21-15.js"
-  data-config="2026-09-03_11-47-57">
 </script>
