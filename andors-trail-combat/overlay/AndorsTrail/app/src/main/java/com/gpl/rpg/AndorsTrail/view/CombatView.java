@@ -13,6 +13,7 @@ import android.view.ViewGroup;
 import android.view.animation.Animation;
 import android.view.animation.Animation.AnimationListener;
 import android.view.animation.AnimationUtils;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageButton;
@@ -339,6 +340,39 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		suppressAnkiTextWatcher = false;
 	}
 
+	/**
+	 * Make combat typing frictionless. A newly shown question (including after
+	 * rotation/retry) should immediately own focus and reopen the Android IME.
+	 * Do not continuously force it back open if the user manually dismisses it;
+	 * only reacquire focus when the field actually lost focus.
+	 */
+	private void focusAnkiInputAndShowKeyboard() {
+		if (ankiSession.phase != CombatController.AnkiCombatSession.Phase.QUESTION) return;
+		if (ankiInput.getVisibility() != View.VISIBLE) return;
+
+		ankiInput.setEnabled(true);
+		ankiInput.setFocusable(true);
+		ankiInput.setFocusableInTouchMode(true);
+
+		if (ankiInput.hasFocus()) return;
+
+		ankiInput.postDelayed(() -> {
+			if (!isAttachedToWindow()
+					|| ankiSession.phase != CombatController.AnkiCombatSession.Phase.QUESTION
+					|| ankiInput.getVisibility() != View.VISIBLE) {
+				return;
+			}
+
+			ankiInput.requestFocus();
+			ankiInput.setSelection(ankiInput.length());
+			InputMethodManager imm =
+					(InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+			if (imm != null) {
+				imm.showSoftInput(ankiInput, InputMethodManager.SHOW_IMPLICIT);
+			}
+		}, 80);
+	}
+
 	private void prepareQuizFrame() {
 		controllers.combatController.setAnkiQuizGateActive(true);
 		actionBar.setVisibility(View.GONE);
@@ -390,6 +424,8 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		setRatingLabel(ankiGood, "Good", card.nextIntervals, 2);
 		setRatingLabel(ankiEasy, "Easy", card.nextIntervals, 3);
 
+		focusAnkiInputAndShowKeyboard();
+
 		if (!ankiSession.errorMessage.isEmpty()) {
 			ankiStatus.setText(ankiSession.errorMessage);
 			ankiRecover.setVisibility(View.VISIBLE);
@@ -407,7 +443,10 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		prepareQuizFrame();
 		ankiQuestion.setText(card.question);
 		setInputTextWithoutWatcher(ankiSession.typedText);
-		ankiInput.setEnabled(false);
+		// Keep the EditText enabled/focused so Android does not dismiss the keyboard
+		// between reveal -> rating -> next combat question. Changes made after reveal
+		// are ignored because the attempt result has already been captured.
+		ankiInput.setEnabled(true);
 		ankiInput.setVisibility(View.VISIBLE);
 		ankiReveal.setVisibility(View.GONE);
 
