@@ -591,9 +591,8 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		}
 
 		prepareQuizFrame();
-		ankiStatus.setText(ankiSession.retryActive && sameCard(ankiSession.retryCard, card)
-				? "Retry: get it right to attack. Any rating after a correct retry records Again."
-				: "Anki combat");
+		ankiStatus.setText("");
+		ankiStatus.setVisibility(View.GONE);
 		ankiQuestion.setText(card.question);
 		setInputTextWithoutWatcher(ankiSession.typedText);
 		ankiInput.setEnabled(true);
@@ -614,6 +613,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 
 		if (!ankiSession.errorMessage.isEmpty()) {
 			ankiStatus.setText(ankiSession.errorMessage);
+			ankiStatus.setVisibility(View.VISIBLE);
 			ankiRecover.setVisibility(View.VISIBLE);
 		}
 	}
@@ -636,16 +636,11 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		ankiInput.setVisibility(View.VISIBLE);
 		ankiReveal.setVisibility(View.GONE);
 
-		if (ankiSession.neutralFirstExposure) {
-			ankiFeedback.setText("First exposure — blank answer is not marked wrong. No attack this turn.");
-		} else if (ankiSession.typedCorrect) {
-			ankiFeedback.setText("ANKI_CORRECT — choose a rating to attack.");
-		} else {
-			ankiFeedback.setText("ANKI_WRONG — choose a rating. Your turn will be skipped.");
-		}
-
-		ankiFeedback.setVisibility(View.VISIBLE);
-		ankiAnswer.setText("Answer: " + card.answer);
+		// The highlighted comparison itself is the feedback. Keep the old feedback
+		// view hidden; this integration no longer needs ANKI_CORRECT/ANKI_WRONG labels.
+		ankiFeedback.setText("");
+		ankiFeedback.setVisibility(View.GONE);
+		ankiAnswer.setText(buildAnswerComparison(ankiSession.typedText, card.answer));
 		ankiAnswer.setVisibility(View.VISIBLE);
 		ankiRatings.setVisibility(View.VISIBLE);
 
@@ -657,23 +652,18 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		setRatingButtonsEnabled(!submitting);
 
 		if (submitting) {
-			String tapped = ratingName(ankiSession.pendingTappedEase);
-			String effective = ratingName(ankiSession.pendingEffectiveEase);
-			ankiStatus.setText(ankiSession.pendingTappedEase != ankiSession.pendingEffectiveEase
-					? "Saving " + effective + " (you tapped " + tapped + ")…"
-					: "Saving " + effective + "…");
+			ankiStatus.setText("Saving…");
+			ankiStatus.setVisibility(View.VISIBLE);
 			if (System.currentTimeMillis() - ankiSession.phaseStartedAt > 30000) {
 				ankiRecover.setVisibility(View.VISIBLE);
 			}
 		} else if (!ankiSession.errorMessage.isEmpty()) {
 			ankiStatus.setText(ankiSession.errorMessage);
+			ankiStatus.setVisibility(View.VISIBLE);
 			ankiRecover.setVisibility(View.VISIBLE);
-		} else if (ankiSession.retryActive && sameCard(ankiSession.retryCard, card)) {
-			ankiStatus.setText(ankiSession.typedCorrect
-					? "Correct retry: every button will be recorded as Again."
-					: "Retry attempt");
 		} else {
-			ankiStatus.setText("Anki combat");
+			ankiStatus.setText("");
+			ankiStatus.setVisibility(View.GONE);
 		}
 	}
 
@@ -714,7 +704,17 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 
 	private void setRatingLabel(Button button, String name, String[] intervals, int index) {
 		String interval = intervals != null && index < intervals.length ? intervals[index] : "";
-		button.setText(interval == null || interval.isEmpty() ? name : name + "\n" + interval);
+		SpannableStringBuilder label = new SpannableStringBuilder();
+		int nameStart = label.length();
+		label.append(name);
+		label.setSpan(new StyleSpan(Typeface.BOLD), nameStart, label.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+		if (interval != null && !interval.isEmpty()) {
+			label.append("\n");
+			int intervalStart = label.length();
+			label.append(interval);
+			label.setSpan(new RelativeSizeSpan(0.78f), intervalStart, label.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+		}
+		button.setText(label);
 	}
 
 	private void revealAnkiAnswer() {
