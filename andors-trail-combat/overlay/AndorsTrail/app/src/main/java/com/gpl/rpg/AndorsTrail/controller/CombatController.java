@@ -103,6 +103,20 @@ public final class CombatController implements VisualEffectCompletedCallback {
 
 	private final AnkiCombatSession ankiCombatSession = new AnkiCombatSession();
 
+	// Mirrors AnkiDroid's previous-answer indicator. Keep this outside resetAll()
+	// so the last actually recorded review survives turn changes and combat UI recreation.
+	private int lastAnkiRecordedEase = 0;
+
+	public int getLastAnkiRecordedEase() {
+		return lastAnkiRecordedEase;
+	}
+
+	public void setLastAnkiRecordedEase(int ease) {
+		if (ease >= 1 && ease <= 4) {
+			lastAnkiRecordedEase = ease;
+		}
+	}
+
 	public CombatController(ControllerContext controllers, WorldContext world) {
 		this.controllers = controllers;
 		this.world = world;
