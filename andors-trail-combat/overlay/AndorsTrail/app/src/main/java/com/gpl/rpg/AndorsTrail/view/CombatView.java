@@ -590,6 +590,9 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		if (operation != ankiSession.operationId) return;
 		boolean shouldAttack = ankiSession.pendingShouldAttack;
 		ankiSession.resetAll();
+		// Prevent the watchdog from loading another card in the small window before
+		// the attack/skip-turn transition completes.
+		ankiSession.bypassForCurrentTurn = true;
 
 		if (!world.model.uiSelections.isInCombat) return;
 		if (shouldAttack) {
