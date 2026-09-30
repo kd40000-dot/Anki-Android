@@ -415,6 +415,10 @@ open class AnkiDroidJsAPI(
                     convertToByteArray(apiContract, true)
                 }
 
+                "undo" -> {
+                    convertToByteArray(apiContract, activity.executeCommand(ViewerCommand.UNDO))
+                }
+
                 "answerEase1" -> {
                     activity.flipOrAnswerCard(Rating.AGAIN)
                     convertToByteArray(apiContract, true)
