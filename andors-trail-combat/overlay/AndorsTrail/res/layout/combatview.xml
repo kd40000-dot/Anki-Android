@@ -153,6 +153,16 @@
             android:textSize="16sp"
             android:visibility="gone" />
 
+        <Button
+            android:id="@+id/combatview_anki_flee"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="end"
+            android:minHeight="0dp"
+            android:text="@string/combat_flee"
+            android:textAllCaps="false"
+            android:textSize="@dimen/actionbar_text" />
+
         <TextView
             android:id="@+id/combatview_anki_status"
             android:layout_width="match_parent"
