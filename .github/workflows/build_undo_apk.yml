@@ -37,7 +37,7 @@ jobs:
         run: find AnkiDroid/build/outputs/apk/full/release -maxdepth 1 -type f -name "*.apk" -print
 
       - name: Upload APKs
-        uses: actions/upload-artifact@6027e3aa94d7f0d47d71506767be5c4be2a015e1 # v4.6.2
+        uses: actions/upload-artifact@v4
         with:
           name: ankidroid-undo-apks
           path: AnkiDroid/build/outputs/apk/full/release/*.apk
