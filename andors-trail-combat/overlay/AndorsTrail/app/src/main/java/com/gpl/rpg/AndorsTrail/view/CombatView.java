@@ -66,6 +66,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	private final TextView monsterActionText;
 
 	private final LinearLayout ankiQuiz;
+	private final TextView ankiPreviousRating;
 	private final TextView ankiStatus;
 	private final TextView ankiQuestion;
 	private final EditText ankiInput;
@@ -173,6 +174,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		monsterActionText = (TextView) findViewById(R.id.combatview_monsterismoving);
 
 		ankiQuiz = (LinearLayout) findViewById(R.id.combatview_anki_quiz);
+		ankiPreviousRating = (TextView) findViewById(R.id.combatview_anki_previous_rating);
 		ankiStatus = (TextView) findViewById(R.id.combatview_anki_status);
 		ankiQuestion = (TextView) findViewById(R.id.combatview_anki_question);
 		ankiInput = (EditText) findViewById(R.id.combatview_anki_input);
@@ -292,14 +294,48 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 				new int[]{disabled, color});
 	}
 
-	private void configureRatingButtonColors() {
-		int hard = resolveThemeColor(R.attr.ui_theme_playername_light_color, Color.rgb(255, 180, 0));
-		int easy = resolveThemeColor(R.attr.ui_theme_reward_light_color, Color.rgb(94, 227, 241));
+	private int ratingColorForEase(int ease) {
+		switch (ease) {
+			case 1:
+				return ANSWER_BAD_COLOR;
+			case 2:
+				return resolveThemeColor(
+						R.attr.ui_theme_playername_light_color,
+						Color.rgb(255, 180, 0));
+			case 3:
+				return ANSWER_GOOD_COLOR;
+			case 4:
+				return resolveThemeColor(
+						R.attr.ui_theme_reward_light_color,
+						Color.rgb(94, 227, 241));
+			default:
+				return ANSWER_NEUTRAL_COLOR;
+		}
+	}
 
-		ankiAgain.setTextColor(ratingColorStateList(ANSWER_BAD_COLOR));
-		ankiHard.setTextColor(ratingColorStateList(hard));
-		ankiGood.setTextColor(ratingColorStateList(ANSWER_GOOD_COLOR));
-		ankiEasy.setTextColor(ratingColorStateList(easy));
+	private void configureRatingButtonColors() {
+		ankiAgain.setTextColor(ratingColorStateList(ratingColorForEase(1)));
+		ankiHard.setTextColor(ratingColorStateList(ratingColorForEase(2)));
+		ankiGood.setTextColor(ratingColorStateList(ratingColorForEase(3)));
+		ankiEasy.setTextColor(ratingColorStateList(ratingColorForEase(4)));
+	}
+
+	private void renderPreviousRatingIndicator() {
+		int ease = controllers.combatController.getLastAnkiRecordedEase();
+		if (ease < 1 || ease > 4) {
+			ankiPreviousRating.setText("");
+			ankiPreviousRating.setVisibility(View.GONE);
+			return;
+		}
+
+		StringBuilder dots = new StringBuilder();
+		for (int i = 0; i < ease; i++) {
+			if (i > 0) dots.append(" ");
+			dots.append("•");
+		}
+		ankiPreviousRating.setText(dots.toString());
+		ankiPreviousRating.setTextColor(ratingColorForEase(ease));
+		ankiPreviousRating.setVisibility(View.VISIBLE);
 	}
 
 	private static String normalizeForComparison(String value) {
@@ -564,6 +600,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		actionBar.setVisibility(View.GONE);
 		monsterActionText.setVisibility(View.GONE);
 		ankiQuiz.setVisibility(View.VISIBLE);
+		renderPreviousRatingIndicator();
 		ankiRecover.setVisibility(View.GONE);
 	}
 
@@ -647,10 +684,15 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		ankiAnswer.setVisibility(View.VISIBLE);
 		ankiRatings.setVisibility(View.VISIBLE);
 
-		setRatingLabel(ankiAgain, "Again", card.nextIntervals, 0);
-		setRatingLabel(ankiHard, "Hard", card.nextIntervals, 1);
-		setRatingLabel(ankiGood, "Good", card.nextIntervals, 2);
-		setRatingLabel(ankiEasy, "Easy", card.nextIntervals, 3);
+		boolean correctRetry =
+				ankiSession.typedCorrect
+						&& ankiSession.retryActive
+						&& sameCard(ankiSession.retryCard, card);
+		int againIndex = 0;
+		setRatingLabel(ankiAgain, "Again", card.nextIntervals, againIndex);
+		setRatingLabel(ankiHard, "Hard", card.nextIntervals, correctRetry ? againIndex : 1);
+		setRatingLabel(ankiGood, "Good", card.nextIntervals, correctRetry ? againIndex : 2);
+		setRatingLabel(ankiEasy, "Easy", card.nextIntervals, correctRetry ? againIndex : 3);
 
 		setRatingButtonsEnabled(!submitting);
 
@@ -808,6 +850,8 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	private void finishSubmittedReview(long operation) {
 		if (operation != ankiSession.operationId) return;
 		boolean shouldAttack = ankiSession.pendingShouldAttack;
+		int recordedEase = ankiSession.pendingEffectiveEase;
+		controllers.combatController.setLastAnkiRecordedEase(recordedEase);
 		ankiSession.resetAll();
 		// Prevent the watchdog from loading another card in the small window before
 		// the attack/skip-turn transition completes.
