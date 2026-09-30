@@ -2,12 +2,21 @@ package com.gpl.rpg.AndorsTrail.view;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.content.res.Resources;
+import android.graphics.Color;
+import android.graphics.Typeface;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
 import android.text.TextWatcher;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.RelativeSizeSpan;
+import android.text.style.StyleSpan;
 import android.util.AttributeSet;
+import android.util.TypedValue;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.Animation;
@@ -177,6 +186,8 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		ankiEasy = (Button) findViewById(R.id.combatview_anki_easy);
 		ankiRecover = (Button) findViewById(R.id.combatview_anki_recover);
 
+		configureRatingButtonColors();
+
 		ankiReveal.setOnClickListener((View v) -> revealAnkiAnswer());
 		ankiAgain.setOnClickListener((View v) -> chooseAnkiRating(1));
 		ankiHard.setOnClickListener((View v) -> chooseAnkiRating(2));
@@ -247,6 +258,181 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 				activeConditionsBar.setVisibility(View.GONE);
 			}
 		});
+	}
+
+	private static final int ANSWER_GOOD_COLOR = Color.rgb(123, 216, 143);
+	private static final int ANSWER_BAD_COLOR = Color.rgb(240, 113, 120);
+	private static final int ANSWER_MISSED_COLOR = Color.rgb(255, 180, 0);
+	private static final int ANSWER_NEUTRAL_COLOR = Color.rgb(218, 218, 218);
+
+	private int resolveThemeColor(int attr, int fallback) {
+		TypedValue value = new TypedValue();
+		if (getContext().getTheme().resolveAttribute(attr, value, true)) {
+			if (value.resourceId != 0) {
+				try {
+					return getResources().getColor(value.resourceId);
+				} catch (Exception ignored) {
+				}
+			}
+			if (value.type >= TypedValue.TYPE_FIRST_COLOR_INT
+					&& value.type <= TypedValue.TYPE_LAST_COLOR_INT) {
+				return value.data;
+			}
+		}
+		return fallback;
+	}
+
+	private ColorStateList ratingColorStateList(int color) {
+		int disabled = Color.argb(110, Color.red(color), Color.green(color), Color.blue(color));
+		return new ColorStateList(
+				new int[][]{
+						new int[]{-android.R.attr.state_enabled},
+						new int[]{}
+				},
+				new int[]{disabled, color});
+	}
+
+	private void configureRatingButtonColors() {
+		int hard = resolveThemeColor(R.attr.ui_theme_playername_light_color, Color.rgb(255, 180, 0));
+		int easy = resolveThemeColor(R.attr.ui_theme_reward_light_color, Color.rgb(94, 227, 241));
+
+		ankiAgain.setTextColor(ratingColorStateList(ANSWER_BAD_COLOR));
+		ankiHard.setTextColor(ratingColorStateList(hard));
+		ankiGood.setTextColor(ratingColorStateList(ANSWER_GOOD_COLOR));
+		ankiEasy.setTextColor(ratingColorStateList(easy));
+	}
+
+	private static String normalizeForComparison(String value) {
+		return value == null ? "" : value.trim().toLowerCase(java.util.Locale.ROOT);
+	}
+
+	private static int editDistance(String a, String b) {
+		String left = normalizeForComparison(a);
+		String right = normalizeForComparison(b);
+		int[][] dp = new int[left.length() + 1][right.length() + 1];
+		for (int i = 0; i <= left.length(); i++) dp[i][0] = i;
+		for (int j = 0; j <= right.length(); j++) dp[0][j] = j;
+		for (int i = 1; i <= left.length(); i++) {
+			for (int j = 1; j <= right.length(); j++) {
+				int cost = left.charAt(i - 1) == right.charAt(j - 1) ? 0 : 1;
+				dp[i][j] = Math.min(
+						Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1),
+						dp[i - 1][j - 1] + cost);
+			}
+		}
+		return dp[left.length()][right.length()];
+	}
+
+	private static String closestAnswerAlternative(String typed, String answer) {
+		String[] alternatives = answer == null ? new String[]{""} : answer.split("\\|", -1);
+		String best = alternatives.length == 0 ? "" : alternatives[0].trim();
+		int bestDistance = editDistance(typed, best);
+		for (int i = 1; i < alternatives.length; i++) {
+			String candidate = alternatives[i].trim();
+			int distance = editDistance(typed, candidate);
+			if (distance < bestDistance) {
+				best = candidate;
+				bestDistance = distance;
+			}
+		}
+		return best;
+	}
+
+	private static final class DiffPiece {
+		final Character typed;
+		final Character expected;
+		final boolean match;
+
+		DiffPiece(Character typed, Character expected, boolean match) {
+			this.typed = typed;
+			this.expected = expected;
+			this.match = match;
+		}
+	}
+
+	private static java.util.List<DiffPiece> alignAnswer(String typedRaw, String expectedRaw) {
+		String typed = typedRaw == null ? "" : typedRaw.trim();
+		String expected = expectedRaw == null ? "" : expectedRaw.trim();
+		String typedCmp = typed.toLowerCase(java.util.Locale.ROOT);
+		String expectedCmp = expected.toLowerCase(java.util.Locale.ROOT);
+
+		int n = typed.length();
+		int m = expected.length();
+		int[][] dp = new int[n + 1][m + 1];
+		for (int i = 0; i <= n; i++) dp[i][0] = i;
+		for (int j = 0; j <= m; j++) dp[0][j] = j;
+		for (int i = 1; i <= n; i++) {
+			for (int j = 1; j <= m; j++) {
+				int cost = typedCmp.charAt(i - 1) == expectedCmp.charAt(j - 1) ? 0 : 1;
+				dp[i][j] = Math.min(
+						Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1),
+						dp[i - 1][j - 1] + cost);
+			}
+		}
+
+		java.util.ArrayList<DiffPiece> reversed = new java.util.ArrayList<>();
+		int i = n;
+		int j = m;
+		while (i > 0 || j > 0) {
+			if (i > 0 && j > 0) {
+				boolean match = typedCmp.charAt(i - 1) == expectedCmp.charAt(j - 1);
+				int cost = match ? 0 : 1;
+				if (dp[i][j] == dp[i - 1][j - 1] + cost) {
+					reversed.add(new DiffPiece(typed.charAt(i - 1), expected.charAt(j - 1), match));
+					i--;
+					j--;
+					continue;
+				}
+			}
+			if (i > 0 && dp[i][j] == dp[i - 1][j] + 1) {
+				reversed.add(new DiffPiece(typed.charAt(i - 1), null, false));
+				i--;
+				continue;
+			}
+			reversed.add(new DiffPiece(null, expected.charAt(j - 1), false));
+			j--;
+		}
+		java.util.Collections.reverse(reversed);
+		return reversed;
+	}
+
+	private static void appendColored(SpannableStringBuilder out, CharSequence text, int color, boolean bold) {
+		int start = out.length();
+		out.append(text);
+		int end = out.length();
+		if (end <= start) return;
+		out.setSpan(new ForegroundColorSpan(color), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+		if (bold) {
+			out.setSpan(new StyleSpan(Typeface.BOLD), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+		}
+	}
+
+	private CharSequence buildAnswerComparison(String typed, String fullAnswer) {
+		String expected = closestAnswerAlternative(typed, fullAnswer);
+		java.util.List<DiffPiece> pieces = alignAnswer(typed, expected);
+		SpannableStringBuilder out = new SpannableStringBuilder();
+
+		appendColored(out, "You:  ", ANSWER_NEUTRAL_COLOR, true);
+		if (typed == null || typed.trim().isEmpty()) {
+			appendColored(out, "(blank)", ANSWER_BAD_COLOR, false);
+		} else {
+			for (DiffPiece piece : pieces) {
+				if (piece.typed == null) continue;
+				appendColored(out, String.valueOf(piece.typed),
+						piece.match ? ANSWER_GOOD_COLOR : ANSWER_BAD_COLOR,
+						!piece.match);
+			}
+		}
+
+		out.append("\n");
+		appendColored(out, "Answer:  ", ANSWER_NEUTRAL_COLOR, true);
+		for (DiffPiece piece : pieces) {
+			if (piece.expected == null) continue;
+			appendColored(out, String.valueOf(piece.expected),
+					piece.match ? ANSWER_GOOD_COLOR : ANSWER_MISSED_COLOR,
+					!piece.match);
+		}
+		return out;
 	}
 
 	private boolean sameCard(AnkiCombatReviewClient.ReviewCard a, AnkiCombatReviewClient.ReviewCard b) {
