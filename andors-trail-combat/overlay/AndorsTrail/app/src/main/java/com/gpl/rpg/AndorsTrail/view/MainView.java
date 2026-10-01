@@ -33,6 +33,7 @@ import com.gpl.rpg.AndorsTrail.util.CoordRect;
 import com.gpl.rpg.AndorsTrail.util.Size;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -419,18 +420,23 @@ public final class MainView extends SurfaceView
 			}
 		}
 
-		final int playerMapIconID =
-				model.player.mapIconID == model.player.iconID
-						? TileManager.tileID_placeholder_hero
-						: model.player.mapIconID;
+		final boolean useEquipmentAppearance = model.player.mapIconID == model.player.iconID;
 		if (!model.player.hasVFXRunning) {
-			drawFromMapPosition(canvas, area, playerPosition, playerMapIconID);
+			if (useEquipmentAppearance) {
+				drawPlayerAppearanceFromMapPosition(canvas, area, playerPosition);
+			} else {
+				drawFromMapPosition(canvas, area, playerPosition, model.player.mapIconID);
+			}
 		} else if (area.contains(playerPosition)) {
 			int vfxElapsedTime = (int) (System.currentTimeMillis() - model.player.vfxStartTime);
 			if (vfxElapsedTime > model.player.vfxDuration) vfxElapsedTime = model.player.vfxDuration;
 			int x = ((model.player.position.x - mapViewArea.topLeft.x) * tileSize * vfxElapsedTime + ((model.player.lastPosition.x - mapViewArea.topLeft.x) * tileSize * (model.player.vfxDuration - vfxElapsedTime))) / model.player.vfxDuration;
 			int y = ((model.player.position.y - mapViewArea.topLeft.y) * tileSize * vfxElapsedTime + ((model.player.lastPosition.y - mapViewArea.topLeft.y) * tileSize * (model.player.vfxDuration - vfxElapsedTime))) / model.player.vfxDuration;
-			tiles.drawTile(canvas, playerMapIconID, x, y, mPaint);
+			if (useEquipmentAppearance) {
+				drawPlayerAppearance(canvas, x, y);
+			} else {
+				tiles.drawTile(canvas, model.player.mapIconID, x, y, mPaint);
+			}
 		}
 		for (MonsterSpawnArea a : currentMap.spawnAreas) {
 			for (Monster m : a.monsters) {
@@ -503,6 +509,18 @@ public final class MainView extends SurfaceView
 		
 	}
 	
+	private void drawPlayerAppearance(Canvas canvas, int px, int py) {
+		Bitmap bitmap = world.tileManager.getPlayerAppearanceBitmap(getResources(), model.player);
+		if (bitmap != null) canvas.drawBitmap(bitmap, px, py, mPaint);
+	}
+
+	private void drawPlayerAppearanceFromMapPosition(Canvas canvas, final CoordRect area, final Coord p) {
+		if (!area.contains(p)) return;
+		int x = (p.x - mapViewArea.topLeft.x) * tileSize;
+		int y = (p.y - mapViewArea.topLeft.y) * tileSize;
+		drawPlayerAppearance(canvas, x, y);
+	}
+
 	private void drawFromMapPosition(Canvas canvas, final CoordRect area, final Coord p, final int tile) {
 		if (!area.contains(p)) return;
 		_drawFromMapPosition(canvas, area, p.x, p.y, tile);

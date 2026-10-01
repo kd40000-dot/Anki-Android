@@ -110,6 +110,7 @@ public final class TileManager {
 	private static final int HERO_EQUIPMENT_COLUMNS = 8;
 
 	private Bitmap heroEquipmentLayers;
+	private Bitmap heroEquipmentBase;
 	private Bitmap playerAppearanceBitmap;
 	private String playerAppearanceSignature;
 
@@ -118,6 +119,13 @@ public final class TileManager {
 			heroEquipmentLayers = BitmapFactory.decodeResource(res, R.drawable.hero_equipment_layers);
 		}
 		return heroEquipmentLayers;
+	}
+
+	private Bitmap getHeroEquipmentBase(Resources res) {
+		if (heroEquipmentBase == null) {
+			heroEquipmentBase = BitmapFactory.decodeResource(res, R.drawable.hero_equipment_base);
+		}
+		return heroEquipmentBase;
 	}
 
 	private String getPlayerAppearanceSignature(Player player) {
@@ -226,7 +234,15 @@ public final class TileManager {
 		paint.setFilterBitmap(false);
 
 		if (player.iconID == CHAR_HERO_0) {
-			drawHeroEquipmentLayer(canvas, res, paint, 0, false);
+			Bitmap base = getHeroEquipmentBase(res);
+			if (base != null) {
+				canvas.drawBitmap(base, null,
+						new Rect(0, 0, HERO_EQUIPMENT_TILE_SIZE, HERO_EQUIPMENT_TILE_SIZE), paint);
+			} else {
+				// Last-resort fallback: the first sheet tile is the same weaponless,
+				// flaskless warrior base.
+				drawHeroEquipmentLayer(canvas, res, paint, 0, false);
+			}
 		} else {
 			Bitmap selectedHero = preloadedTiles == null ? null : preloadedTiles.getBitmap(player.iconID);
 			if (selectedHero != null) {
