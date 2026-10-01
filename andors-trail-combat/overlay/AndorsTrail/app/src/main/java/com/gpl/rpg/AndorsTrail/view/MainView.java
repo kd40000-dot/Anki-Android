@@ -420,7 +420,9 @@ public final class MainView extends SurfaceView
 			}
 		}
 
-		final boolean useEquipmentAppearance = model.player.mapIconID == model.player.iconID;
+		// Normal saves may keep mapIconID at 0 or at one of the selectable hero IDs.
+		// Only larger IDs are temporary replacement sprites (ship, sheep, quest effects, etc.).
+		final boolean useEquipmentAppearance = model.player.mapIconID <= TileManager.LAST_HERO;
 		if (!model.player.hasVFXRunning) {
 			if (useEquipmentAppearance) {
 				drawPlayerAppearanceFromMapPosition(canvas, area, playerPosition);

@@ -128,6 +128,23 @@ public final class TileManager {
 		return heroEquipmentBase;
 	}
 
+	private boolean hasVisiblePixels(Bitmap bitmap) {
+		if (bitmap == null || bitmap.getWidth() <= 0 || bitmap.getHeight() <= 0) return false;
+		int[] pixels = new int[bitmap.getWidth() * bitmap.getHeight()];
+		bitmap.getPixels(pixels, 0, bitmap.getWidth(), 0, 0, bitmap.getWidth(), bitmap.getHeight());
+		for (int pixel : pixels) {
+			if ((pixel >>> 24) != 0) return true;
+		}
+		return false;
+	}
+
+	private Bitmap getFallbackHeroBitmap(Resources res, Player player) {
+		Bitmap fallback = preloadedTiles == null ? null : preloadedTiles.getBitmap(player.iconID);
+		if (hasVisiblePixels(fallback)) return fallback;
+		fallback = BitmapFactory.decodeResource(res, R.drawable.char_hero);
+		return hasVisiblePixels(fallback) ? fallback : null;
+	}
+
 	private String getPlayerAppearanceSignature(Player player) {
 		StringBuilder sb = new StringBuilder();
 		sb.append(player.iconID);
@@ -277,6 +294,15 @@ public final class TileManager {
 			int shieldLayer = getShieldLayer(categoryID(offHand));
 			if (offHand != null && shieldLayer < 0 && offHand.isShield()) shieldLayer = 34;
 			drawHeroEquipmentLayer(canvas, res, paint, shieldLayer, false);
+		}
+
+		// Never allow a bad/missing art resource to make the player disappear.
+		if (!hasVisiblePixels(result)) {
+			Bitmap fallback = getFallbackHeroBitmap(res, player);
+			if (fallback != null) {
+				canvas.drawBitmap(fallback, null,
+						new Rect(0, 0, HERO_EQUIPMENT_TILE_SIZE, HERO_EQUIPMENT_TILE_SIZE), paint);
+			}
 		}
 		return result;
 	}
