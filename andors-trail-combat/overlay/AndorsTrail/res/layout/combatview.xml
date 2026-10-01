@@ -202,7 +202,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
             android:hint="Type answer"
-            android:hintTextColor="?attr/ui_theme_palette_text_gray_mid_color"
+            android:textColorHint="?attr/ui_theme_palette_text_gray_mid_color"
             android:inputType="text"
             android:padding="10dp"
             android:singleLine="true"
