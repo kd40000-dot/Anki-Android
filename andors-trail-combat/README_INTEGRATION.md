@@ -29,3 +29,5 @@ Use these branches as the maintained pair:
 Future integration edits should preserve the package/authority values above.
 
 <!-- UI playground build trigger: themed question/input iteration -->
+
+<!-- UI playground final trigger: centered question + themed input -->
