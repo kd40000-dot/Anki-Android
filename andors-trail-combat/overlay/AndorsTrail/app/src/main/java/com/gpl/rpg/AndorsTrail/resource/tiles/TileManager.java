@@ -9,8 +9,11 @@ import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.ColorFilter;
 import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
@@ -104,21 +107,32 @@ public final class TileManager {
 	public TileCollection adjacentMapTiles;
 	private final HashSet<Integer> preloadedTileIDs = new HashSet<Integer>();
 
-	// Equipment-driven player appearance. The art is a native-style 32x32 layer
-	// sheet derived from Andor's Trail's hero/NPC proportions and item icon language.
+	// Equipment-driven player appearance. The base is the original warrior silhouette
+	// with its baked-in sword and flask removed. Equipment is composed from cohesive
+	// body-region layers, then recolored from the equipped item's actual in-game icon.
 	private static final int HERO_EQUIPMENT_TILE_SIZE = 32;
 	private static final int HERO_EQUIPMENT_COLUMNS = 8;
 
 	private Bitmap heroEquipmentLayers;
+	private Bitmap heroEquipmentMasks;
 	private Bitmap heroEquipmentBase;
 	private Bitmap playerAppearanceBitmap;
 	private String playerAppearanceSignature;
+	private final HashMap<String, Bitmap> equipmentLayerCache = new HashMap<String, Bitmap>();
+	private final HashMap<String, int[]> equipmentPaletteCache = new HashMap<String, int[]>();
 
 	private Bitmap getHeroEquipmentLayers(Resources res) {
 		if (heroEquipmentLayers == null) {
 			heroEquipmentLayers = BitmapFactory.decodeResource(res, R.drawable.hero_equipment_layers);
 		}
 		return heroEquipmentLayers;
+	}
+
+	private Bitmap getHeroEquipmentMasks(Resources res) {
+		if (heroEquipmentMasks == null) {
+			heroEquipmentMasks = BitmapFactory.decodeResource(res, R.drawable.hero_equipment_masks);
+		}
+		return heroEquipmentMasks;
 	}
 
 	private Bitmap getHeroEquipmentBase(Resources res) {
@@ -157,9 +171,32 @@ public final class TileManager {
 		return sb.toString();
 	}
 
-	private int getBodyLayer(String category) {
-		if ("bdy_clth".equals(category)) return 1;
-		if ("bdy_lthr".equals(category)) return 2;
+	private String categoryID(ItemType type) {
+		return type == null || type.category == null ? null : type.category.id;
+	}
+
+	private String itemText(ItemType type, Player player) {
+		if (type == null) return "";
+		StringBuilder sb = new StringBuilder();
+		String name = type.getName(player);
+		if (name != null) sb.append(name).append(' ');
+		String description = type.getDescription();
+		if (description != null) sb.append(description);
+		return sb.toString().toLowerCase();
+	}
+
+	private int getBodyLayer(ItemType type, Player player) {
+		String category = categoryID(type);
+		String text = itemText(type, player);
+		if ("bdy_clth".equals(category)) {
+			if (text.contains("robe") || text.contains("gown") || text.contains("tunic")) return 43;
+			return 1;
+		}
+		if ("bdy_lthr".equals(category)) {
+			if (text.contains("hard leather") || text.contains("hardened leather")
+					|| text.contains("reinforced leather")) return 44;
+			return 2;
+		}
 		if ("bdy_hide".equals(category)) return 3;
 		if ("bdy_lt".equals(category)) return 4;
 		if ("bdy_hv".equals(category)) return 5;
@@ -170,78 +207,248 @@ public final class TileManager {
 		return -1;
 	}
 
-	private int getHeadLayer(String category) {
-		if ("hd_cloth".equals(category)) return 9;
-		if ("hd_lthr".equals(category)) return 10;
-		if ("hd_mtl_li".equals(category)) return 11;
-		if ("hd_mtl_hv".equals(category)) return 12;
-		if (category != null && category.startsWith("hd_")) return 10;
+	private int getHeadLayer(ItemType type, Player player) {
+		String category = categoryID(type);
+		String text = itemText(type, player);
+		if ("hd_cloth".equals(category)) {
+			if (text.contains("hood") || text.contains("cowl")) return 10;
+			return 9;
+		}
+		if ("hd_lthr".equals(category)) return 11;
+		if ("hd_mtl_li".equals(category)) return 12;
+		if ("hd_mtl_hv".equals(category)) return 13;
+		if (category != null && category.startsWith("hd_")) return 11;
 		return -1;
 	}
 
-	private int getHandLayer(String category) {
-		if ("hnd_lthr".equals(category) || "hnd_cloth".equals(category)) return 13;
-		if ("hnd_mtl_li".equals(category) || "hnd_mtl_hv".equals(category)) return 14;
+	private int getHandLayer(ItemType type) {
+		String category = categoryID(type);
+		if ("hnd_cloth".equals(category)) return 14;
+		if ("hnd_lthr".equals(category)) return 15;
+		if ("hnd_mtl_li".equals(category)) return 16;
+		if ("hnd_mtl_hv".equals(category)) return 17;
 		return -1;
 	}
 
-	private int getFeetLayer(String category) {
-		if ("feet_lthr".equals(category) || "feet_clth".equals(category)) return 15;
-		if ("feet_mtl_li".equals(category) || "feet_mtl_hv".equals(category)) return 16;
+	private int getFeetLayer(ItemType type) {
+		String category = categoryID(type);
+		if ("feet_clth".equals(category)) return 18;
+		if ("feet_lthr".equals(category)) return 19;
+		if ("feet_mtl_li".equals(category)) return 20;
+		if ("feet_mtl_hv".equals(category)) return 21;
 		return -1;
 	}
 
-	private int getWeaponLayer(String category) {
-		if ("dagger".equals(category)) return 17;
-		if ("ssword".equals(category)) return 18;
-		if ("rapier".equals(category)) return 19;
-		if ("lsword".equals(category)) return 20;
-		if ("2hsword".equals(category)) return 21;
-		if ("bsword".equals(category)) return 22;
-		if ("axe".equals(category)) return 23;
-		if ("axe2h".equals(category)) return 24;
-		if ("club".equals(category)) return 25;
-		if ("staff".equals(category)) return 26;
-		if ("mace".equals(category)) return 27;
-		if ("scepter".equals(category)) return 28;
-		if ("hammer".equals(category)) return 29;
-		if ("hammer2h".equals(category)) return 30;
-		if ("pole".equals(category)) return 31;
+	private int getWeaponLayer(ItemType type) {
+		String category = categoryID(type);
+		if ("dagger".equals(category)) return 22;
+		if ("ssword".equals(category)) return 23;
+		if ("rapier".equals(category)) return 24;
+		if ("lsword".equals(category)) return 25;
+		if ("2hsword".equals(category)) return 26;
+		if ("bsword".equals(category)) return 27;
+		if ("axe".equals(category)) return 28;
+		if ("axe2h".equals(category)) return 29;
+		if ("club".equals(category)) return 30;
+		if ("staff".equals(category)) return 31;
+		if ("mace".equals(category)) return 32;
+		if ("scepter".equals(category)) return 33;
+		if ("hammer".equals(category)) return 34;
+		if ("hammer2h".equals(category)) return 35;
+		if ("pole".equals(category)) return 36;
 		return -1;
 	}
 
-	private int getShieldLayer(String category) {
-		if ("buckler".equals(category)) return 32;
-		if ("shld_wd_li".equals(category)) return 33;
-		if ("shld_mtl_li".equals(category)) return 34;
-		if ("shld_wd_hv".equals(category)) return 35;
-		if ("shld_mtl_hv".equals(category)) return 36;
-		if ("shld_twr".equals(category)) return 37;
-		if (category != null && category.startsWith("shld_wd")) return 35;
-		if (category != null && category.startsWith("shld_")) return 36;
+	private int getShieldLayer(ItemType type) {
+		String category = categoryID(type);
+		if ("buckler".equals(category)) return 37;
+		if ("shld_wd_li".equals(category)) return 38;
+		if ("shld_mtl_li".equals(category)) return 39;
+		if ("shld_wd_hv".equals(category)) return 40;
+		if ("shld_mtl_hv".equals(category)) return 41;
+		if ("shld_twr".equals(category)) return 42;
+		if (category != null && category.startsWith("shld_wd")) return 40;
+		if (category != null && category.startsWith("shld_")) return 41;
 		return -1;
 	}
 
-	private String categoryID(ItemType type) {
-		return type == null || type.category == null ? null : type.category.id;
+	private int clampColor(int value) {
+		return Math.max(0, Math.min(255, value));
 	}
 
-	private void drawHeroEquipmentLayer(Canvas canvas, Resources res, Paint paint, int layerIndex, boolean mirror) {
-		if (layerIndex < 0) return;
-		Bitmap sheet = getHeroEquipmentLayers(res);
-		if (sheet == null) return;
+	private int shadeColor(int color, float factor) {
+		return Color.rgb(
+				clampColor((int) (Color.red(color) * factor)),
+				clampColor((int) (Color.green(color) * factor)),
+				clampColor((int) (Color.blue(color) * factor)));
+	}
+
+	private int colorDistanceSquared(int a, int b) {
+		int dr = Color.red(a) - Color.red(b);
+		int dg = Color.green(a) - Color.green(b);
+		int db = Color.blue(a) - Color.blue(b);
+		return dr * dr + dg * dg + db * db;
+	}
+
+	private int defaultPrimaryColor(ItemType type) {
+		String category = categoryID(type);
+		if (category == null) return Color.rgb(145, 145, 150);
+		if (category.contains("lthr") || "bdy_hide".equals(category)) return Color.rgb(125, 78, 52);
+		if (category.startsWith("shld_wd")) return Color.rgb(126, 84, 49);
+		if ("club".equals(category) || "staff".equals(category)) return Color.rgb(126, 84, 49);
+		if ("scepter".equals(category)) return Color.rgb(175, 135, 62);
+		if (category.contains("mtl") || "chmail".equals(category) || "spmail".equals(category)
+				|| "plmail".equals(category) || "bdy_hv".equals(category)
+				|| type.isWeapon() || type.isShield()) return Color.rgb(145, 150, 158);
+		return Color.rgb(145, 145, 150);
+	}
+
+	private int defaultSecondaryColor(ItemType type) {
+		String category = categoryID(type);
+		if (category != null && (category.contains("lthr") || "bdy_hide".equals(category)
+				|| category.startsWith("shld_wd") || "club".equals(category) || "staff".equals(category))) {
+			return Color.rgb(78, 50, 36);
+		}
+		if ("scepter".equals(category)) return Color.rgb(102, 73, 42);
+		return Color.rgb(78, 66, 58);
+	}
+
+	private int[] getEquipmentPalette(ItemType type, Resources res) {
+		if (type == null) return new int[] { Color.rgb(145, 145, 150), Color.rgb(78, 66, 58) };
+		int[] cached = equipmentPaletteCache.get(type.id);
+		if (cached != null) return cached;
+
+		int primary = defaultPrimaryColor(type);
+		int secondary = defaultSecondaryColor(type);
+		try {
+			Bitmap icon = tileCache.loadSingleTile(type.iconID, res);
+			if (icon != null) {
+				HashMap<Integer, Integer> counts = new HashMap<Integer, Integer>();
+				for (int y = 0; y < icon.getHeight(); ++y) {
+					for (int x = 0; x < icon.getWidth(); ++x) {
+						int pixel = icon.getPixel(x, y);
+						if (Color.alpha(pixel) < 96) continue;
+						int r = Color.red(pixel);
+						int g = Color.green(pixel);
+						int b = Color.blue(pixel);
+						int max = Math.max(r, Math.max(g, b));
+						int min = Math.min(r, Math.min(g, b));
+						int luma = (r * 3 + g * 5 + b * 2) / 10;
+						if (luma < 38) continue; // ignore black outlines
+						int qr = (r >> 4) << 4;
+						int qg = (g >> 4) << 4;
+						int qb = (b >> 4) << 4;
+						int key = Color.rgb(qr, qg, qb);
+						int weight = 1;
+						if (max - min > 45) weight++; // preserve strongly colored cloth/leather
+						Integer old = counts.get(key);
+						counts.put(key, old == null ? weight : old + weight);
+					}
+				}
+
+				int bestCount = -1;
+				for (Integer color : counts.keySet()) {
+					int count = counts.get(color);
+					if (count > bestCount) {
+						bestCount = count;
+						primary = color;
+					}
+				}
+
+				int secondCount = -1;
+				for (Integer color : counts.keySet()) {
+					if (colorDistanceSquared(primary, color) < 3600) continue;
+					int count = counts.get(color);
+					if (count > secondCount) {
+						secondCount = count;
+						secondary = color;
+					}
+				}
+			}
+		} catch (RuntimeException ignored) {
+			// Keep category-based fallbacks if an icon is unavailable during a transient load.
+		}
+		int[] result = new int[] { primary, secondary };
+		equipmentPaletteCache.put(type.id, result);
+		return result;
+	}
+
+	private Bitmap getRenderedEquipmentLayer(Resources res, int layerIndex, ItemType type, boolean mirror) {
+		if (layerIndex < 0 || type == null) return null;
+		String key = layerIndex + ":" + type.id + ":" + (mirror ? "m" : "n");
+		Bitmap cached = equipmentLayerCache.get(key);
+		if (cached != null) return cached;
+
+		Bitmap sourceSheet = getHeroEquipmentLayers(res);
+		if (sourceSheet == null) return null;
 		int sx = (layerIndex % HERO_EQUIPMENT_COLUMNS) * HERO_EQUIPMENT_TILE_SIZE;
 		int sy = (layerIndex / HERO_EQUIPMENT_COLUMNS) * HERO_EQUIPMENT_TILE_SIZE;
+		if (sx + HERO_EQUIPMENT_TILE_SIZE > sourceSheet.getWidth()
+				|| sy + HERO_EQUIPMENT_TILE_SIZE > sourceSheet.getHeight()) return null;
+
+		int[] palette = getEquipmentPalette(type, res);
+		Bitmap result = Bitmap.createBitmap(HERO_EQUIPMENT_TILE_SIZE, HERO_EQUIPMENT_TILE_SIZE, Bitmap.Config.ARGB_8888);
+		for (int y = 0; y < HERO_EQUIPMENT_TILE_SIZE; ++y) {
+			for (int x = 0; x < HERO_EQUIPMENT_TILE_SIZE; ++x) {
+				int marker = sourceSheet.getPixel(sx + x, sy + y);
+				int alpha = Color.alpha(marker);
+				if (alpha == 0) continue;
+				int r = Color.red(marker);
+				int g = Color.green(marker);
+				int b = Color.blue(marker);
+				boolean secondaryMarker = r > 120 && b > 120 && g < 180 && r > g + 45 && b > g + 45;
+				int baseColor = secondaryMarker ? palette[1] : palette[0];
+				float factor;
+				if (secondaryMarker) {
+					if (r < 180) factor = 0.58f;
+					else if (g > 80) factor = 1.28f;
+					else factor = 0.95f;
+				} else {
+					int luma = (r + g + b) / 3;
+					if (luma < 50) factor = 0.24f;
+					else if (luma < 110) factor = 0.56f;
+					else if (luma < 190) factor = 0.92f;
+					else factor = 1.28f;
+				}
+				int shaded = shadeColor(baseColor, factor);
+				int dx = mirror ? HERO_EQUIPMENT_TILE_SIZE - 1 - x : x;
+				result.setPixel(dx, y, Color.argb(alpha, Color.red(shaded), Color.green(shaded), Color.blue(shaded)));
+			}
+		}
+		equipmentLayerCache.put(key, result);
+		return result;
+	}
+
+	private void drawHeroEquipmentMask(Canvas canvas, Resources res, int layerIndex, boolean mirror) {
+		if (layerIndex < 0) return;
+		Bitmap maskSheet = getHeroEquipmentMasks(res);
+		if (maskSheet == null) return;
+		int sx = (layerIndex % HERO_EQUIPMENT_COLUMNS) * HERO_EQUIPMENT_TILE_SIZE;
+		int sy = (layerIndex / HERO_EQUIPMENT_COLUMNS) * HERO_EQUIPMENT_TILE_SIZE;
+		if (sx + HERO_EQUIPMENT_TILE_SIZE > maskSheet.getWidth()
+				|| sy + HERO_EQUIPMENT_TILE_SIZE > maskSheet.getHeight()) return;
 		Rect src = new Rect(sx, sy, sx + HERO_EQUIPMENT_TILE_SIZE, sy + HERO_EQUIPMENT_TILE_SIZE);
 		Rect dst = new Rect(0, 0, HERO_EQUIPMENT_TILE_SIZE, HERO_EQUIPMENT_TILE_SIZE);
+		Paint clearPaint = new Paint();
+		clearPaint.setFilterBitmap(false);
+		clearPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
 		if (mirror) {
 			canvas.save();
 			canvas.scale(-1f, 1f, HERO_EQUIPMENT_TILE_SIZE / 2f, HERO_EQUIPMENT_TILE_SIZE / 2f);
-			canvas.drawBitmap(sheet, src, dst, paint);
+			canvas.drawBitmap(maskSheet, src, dst, clearPaint);
 			canvas.restore();
 		} else {
-			canvas.drawBitmap(sheet, src, dst, paint);
+			canvas.drawBitmap(maskSheet, src, dst, clearPaint);
 		}
+		clearPaint.setXfermode(null);
+	}
+
+	private void drawHeroEquipmentLayer(Canvas canvas, Resources res, Paint paint,
+			int layerIndex, ItemType type, boolean mirror, boolean replaceCoveredBase) {
+		if (layerIndex < 0 || type == null) return;
+		if (replaceCoveredBase) drawHeroEquipmentMask(canvas, res, layerIndex, mirror);
+		Bitmap layer = getRenderedEquipmentLayer(res, layerIndex, type, mirror);
+		if (layer != null) canvas.drawBitmap(layer, 0, 0, paint);
 	}
 
 	private Bitmap buildPlayerAppearance(Resources res, Player player) {
@@ -252,21 +459,27 @@ public final class TileManager {
 
 		if (player.iconID == CHAR_HERO_0) {
 			Bitmap base = getHeroEquipmentBase(res);
-			if (base != null) {
+			if (hasVisiblePixels(base)) {
 				canvas.drawBitmap(base, null,
 						new Rect(0, 0, HERO_EQUIPMENT_TILE_SIZE, HERO_EQUIPMENT_TILE_SIZE), paint);
 			} else {
-				// Last-resort fallback: the first sheet tile is the same weaponless,
-				// flaskless warrior base.
-				drawHeroEquipmentLayer(canvas, res, paint, 0, false);
+				Bitmap fallback = getFallbackHeroBitmap(res, player);
+				if (fallback != null) {
+					canvas.drawBitmap(fallback, null,
+							new Rect(0, 0, HERO_EQUIPMENT_TILE_SIZE, HERO_EQUIPMENT_TILE_SIZE), paint);
+				}
 			}
 		} else {
 			Bitmap selectedHero = preloadedTiles == null ? null : preloadedTiles.getBitmap(player.iconID);
-			if (selectedHero != null) {
+			if (hasVisiblePixels(selectedHero)) {
 				canvas.drawBitmap(selectedHero, null,
 						new Rect(0, 0, HERO_EQUIPMENT_TILE_SIZE, HERO_EQUIPMENT_TILE_SIZE), paint);
 			} else {
-				drawHeroEquipmentLayer(canvas, res, paint, 0, false);
+				Bitmap fallback = getFallbackHeroBitmap(res, player);
+				if (fallback != null) {
+					canvas.drawBitmap(fallback, null,
+							new Rect(0, 0, HERO_EQUIPMENT_TILE_SIZE, HERO_EQUIPMENT_TILE_SIZE), paint);
+				}
 			}
 		}
 
@@ -277,26 +490,33 @@ public final class TileManager {
 		ItemType mainHand = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.weapon);
 		ItemType offHand = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.shield);
 
-		drawHeroEquipmentLayer(canvas, res, paint, getBodyLayer(categoryID(body)), false);
-		drawHeroEquipmentLayer(canvas, res, paint, getFeetLayer(categoryID(feet)), false);
-		drawHeroEquipmentLayer(canvas, res, paint, getHandLayer(categoryID(hands)), false);
-		drawHeroEquipmentLayer(canvas, res, paint, getHeadLayer(categoryID(head)), false);
+		// Armor pieces replace only the body pixels they physically cover.
+		// A shirt cannot erase the head or hands, gloves stay on the hands,
+		// boots stay on the lower legs/feet, and body armor stops around the hips.
+		drawHeroEquipmentLayer(canvas, res, paint, getBodyLayer(body, player), body, false, true);
+		drawHeroEquipmentLayer(canvas, res, paint, getFeetLayer(feet), feet, false, true);
+		drawHeroEquipmentLayer(canvas, res, paint, getHandLayer(hands), hands, false, true);
+		drawHeroEquipmentLayer(canvas, res, paint, getHeadLayer(head, player), head, false, true);
 
-		int mainWeaponLayer = getWeaponLayer(categoryID(mainHand));
-		if (mainHand != null && mainWeaponLayer < 0 && mainHand.isWeapon()) mainWeaponLayer = 20;
-		drawHeroEquipmentLayer(canvas, res, paint, mainWeaponLayer, false);
-
+		// Off-hand equipment sits behind the main-hand weapon so the silhouette
+		// stays readable when both occupy nearby pixels.
 		if (offHand != null && offHand.isWeapon()) {
-			int offWeaponLayer = getWeaponLayer(categoryID(offHand));
-			if (offWeaponLayer < 0) offWeaponLayer = 17;
-			drawHeroEquipmentLayer(canvas, res, paint, offWeaponLayer, true);
-		} else {
-			int shieldLayer = getShieldLayer(categoryID(offHand));
-			if (offHand != null && shieldLayer < 0 && offHand.isShield()) shieldLayer = 34;
-			drawHeroEquipmentLayer(canvas, res, paint, shieldLayer, false);
+			int offWeaponLayer = getWeaponLayer(offHand);
+			if (offWeaponLayer < 0) offWeaponLayer = 22;
+			drawHeroEquipmentLayer(canvas, res, paint, offWeaponLayer, offHand, true, false);
+		} else if (offHand != null) {
+			int shieldLayer = getShieldLayer(offHand);
+			if (shieldLayer < 0 && offHand.isShield()) shieldLayer = 39;
+			drawHeroEquipmentLayer(canvas, res, paint, shieldLayer, offHand, false, false);
 		}
 
-		// Never allow a bad/missing art resource to make the player disappear.
+		if (mainHand != null) {
+			int mainWeaponLayer = getWeaponLayer(mainHand);
+			if (mainWeaponLayer < 0 && mainHand.isWeapon()) mainWeaponLayer = 25;
+			drawHeroEquipmentLayer(canvas, res, paint, mainWeaponLayer, mainHand, false, false);
+		}
+
+		// A corrupt or unsupported equipment resource must never make the player invisible.
 		if (!hasVisiblePixels(result)) {
 			Bitmap fallback = getFallbackHeroBitmap(res, player);
 			if (fallback != null) {
