@@ -195,6 +195,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		ankiFlee.setOnClickListener((View v) -> {
 			hideAnkiKeyboardAndClearFocus();
 			ankiQuiz.setVisibility(View.GONE);
+			ankiFlee.setVisibility(View.GONE);
 			actionBar.setVisibility(View.VISIBLE);
 			controllers.combatController.startFlee();
 			MainView mv = ((MainActivity) getContext()).getMainView();
@@ -626,6 +627,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		actionBar.setVisibility(View.GONE);
 		monsterActionText.setVisibility(View.GONE);
 		ankiQuiz.setVisibility(View.VISIBLE);
+		ankiFlee.setVisibility(View.VISIBLE);
 		renderPreviousRatingIndicator();
 		ankiRecover.setVisibility(View.GONE);
 	}
@@ -744,6 +746,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 
 		if (!world.model.uiSelections.isInCombat) {
 			ankiQuiz.setVisibility(View.GONE);
+			ankiFlee.setVisibility(View.GONE);
 			hideAnkiKeyboardAndClearFocus();
 			return;
 		}
@@ -758,6 +761,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 			case IDLE:
 				controllers.combatController.setAnkiQuizGateActive(false);
 				ankiQuiz.setVisibility(View.GONE);
+				ankiFlee.setVisibility(View.GONE);
 				hideAnkiKeyboardAndClearFocus();
 				actionBar.setVisibility(View.VISIBLE);
 				if (allowLoad && !ankiSession.bypassForCurrentTurn) loadAnkiCardForPlayerTurn();
@@ -1009,6 +1013,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		controllers.combatController.resetAnkiQuizAndUnlockCombat();
 		ankiSession.bypassForCurrentTurn = true;
 		ankiQuiz.setVisibility(View.GONE);
+		ankiFlee.setVisibility(View.GONE);
 		hideAnkiKeyboardAndClearFocus();
 		actionBar.setVisibility(View.VISIBLE);
 		setRatingButtonsEnabled(true);
@@ -1026,6 +1031,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	private void updateTurnInfo(Monster currentActiveMonster) {
 		if (currentActiveMonster != null) {
 			ankiQuiz.setVisibility(View.GONE);
+			ankiFlee.setVisibility(View.GONE);
 			hideAnkiKeyboardAndClearFocus();
 			actionBar.setVisibility(View.INVISIBLE);
 			monsterActionText.setVisibility(View.VISIBLE);
@@ -1203,6 +1209,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	@Override
 	public void onCombatEnded() {
 		ankiQuiz.setVisibility(View.GONE);
+		ankiFlee.setVisibility(View.GONE);
 		hideAnkiKeyboardAndClearFocus();
 		setRatingButtonsEnabled(true);
 		hide();
@@ -1218,6 +1225,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	@Override
 	public void onMonsterIsAttacking(Monster m) {
 		ankiQuiz.setVisibility(View.GONE);
+		ankiFlee.setVisibility(View.GONE);
 		hideAnkiKeyboardAndClearFocus();
 		updateTurnInfo(m);
 	}
@@ -1227,6 +1235,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		if (actor == currentMonster) updateMonsterHealth(currentMonster);
 		if (actor == player && player.isDead()) {
 			ankiQuiz.setVisibility(View.GONE);
+			ankiFlee.setVisibility(View.GONE);
 			hideAnkiKeyboardAndClearFocus();
 		}
 	}
