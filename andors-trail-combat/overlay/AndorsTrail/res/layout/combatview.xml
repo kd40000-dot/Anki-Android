@@ -165,35 +165,41 @@
             android:gravity="center"
             android:textSize="@dimen/actionbar_text" />
 
-        <LinearLayout
+        <RelativeLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:gravity="center_vertical"
-            android:orientation="horizontal">
+            android:gravity="center_vertical">
 
             <TextView
                 android:id="@+id/combatview_anki_question"
                 style="@style/AndorsTrail_Style_LightFrame"
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
+                android:layout_centerVertical="true"
                 android:gravity="center"
-                android:padding="10dp"
-                android:textColor="?attr/ui_theme_textbutton_textcolor_color"
+                android:lineSpacingExtra="2dp"
+                android:minHeight="62dp"
+                android:paddingLeft="44dp"
+                android:paddingTop="10dp"
+                android:paddingRight="44dp"
+                android:paddingBottom="10dp"
+                android:textColor="?attr/ui_theme_dialogue_light_color"
                 android:textIsSelectable="true"
-                android:textSize="22sp"
+                android:textSize="24sp"
                 android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/combatview_anki_previous_rating"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:gravity="center_vertical|end"
+                android:layout_alignParentRight="true"
+                android:layout_centerVertical="true"
+                android:gravity="center"
                 android:paddingLeft="8dp"
-                android:paddingRight="2dp"
+                android:paddingRight="8dp"
                 android:textSize="16sp"
                 android:visibility="gone" />
-        </LinearLayout>
+        </RelativeLayout>
 
         <EditText
             android:id="@+id/combatview_anki_input"
@@ -201,13 +207,21 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
+            android:layout_marginBottom="6dp"
+            android:gravity="center_vertical"
             android:hint="Type answer"
-            android:textColorHint="?attr/ui_theme_palette_text_gray_mid_color"
             android:inputType="text"
-            android:padding="10dp"
+            android:minHeight="52dp"
+            android:paddingLeft="12dp"
+            android:paddingTop="8dp"
+            android:paddingRight="12dp"
+            android:paddingBottom="8dp"
             android:singleLine="true"
-            android:textColor="?attr/ui_theme_textbutton_textcolor_color"
-            android:textSize="18sp" />
+            android:textColor="?attr/ui_theme_dialogue_light_color"
+            android:textColorHighlight="?attr/ui_theme_reward_dark_color"
+            android:textColorHint="?attr/ui_theme_palette_text_gray_mid_color"
+            android:textCursorDrawable="@null"
+            android:textSize="20sp" />
 
         <Button
             android:id="@+id/combatview_anki_reveal"
