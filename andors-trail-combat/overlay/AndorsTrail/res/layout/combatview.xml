@@ -97,13 +97,27 @@
                 android:padding="8dp"
                 android:scaleType="fitCenter" />
 
-            <ImageButton
-                android:id="@+id/combatview_monsterconditions_button"
+            <Button
+                android:id="@+id/combatview_anki_flee"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_alignParentRight="true"
                 android:layout_centerVertical="true"
+                android:minHeight="0dp"
+                android:paddingLeft="8dp"
+                android:paddingRight="8dp"
+                android:text="@string/combat_flee"
+                android:textAllCaps="false"
+                android:textSize="@dimen/actionbar_text"
+                android:visibility="gone" />
+
+            <ImageButton
+                android:id="@+id/combatview_monsterconditions_button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_centerVertical="true"
                 android:layout_margin="0sp"
+                android:layout_toLeftOf="@id/combatview_anki_flee"
                 android:contentDescription="@string/dialog_monsterencounter_conditions"
                 android:padding="8dp"
                 android:scaleType="fitCenter" />
@@ -145,40 +159,39 @@
         android:visibility="gone">
 
         <TextView
-            android:id="@+id/combatview_anki_previous_rating"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="end"
-            android:paddingRight="4dp"
-            android:textSize="16sp"
-            android:visibility="gone" />
-
-        <Button
-            android:id="@+id/combatview_anki_flee"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="end"
-            android:minHeight="0dp"
-            android:text="@string/combat_flee"
-            android:textAllCaps="false"
-            android:textSize="@dimen/actionbar_text" />
-
-        <TextView
             android:id="@+id/combatview_anki_status"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center"
             android:textSize="@dimen/actionbar_text" />
 
-        <TextView
-            android:id="@+id/combatview_anki_question"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingTop="8dp"
-            android:paddingBottom="8dp"
-            android:textIsSelectable="true"
-            android:textSize="18sp"
-            android:textStyle="bold" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/combatview_anki_question"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:textIsSelectable="true"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/combatview_anki_previous_rating"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical|end"
+                android:paddingLeft="8dp"
+                android:paddingRight="2dp"
+                android:textSize="16sp"
+                android:visibility="gone" />
+        </LinearLayout>
 
         <EditText
             android:id="@+id/combatview_anki_input"
