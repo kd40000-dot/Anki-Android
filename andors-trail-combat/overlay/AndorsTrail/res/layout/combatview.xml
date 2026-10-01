@@ -173,13 +173,15 @@
 
             <TextView
                 android:id="@+id/combatview_anki_question"
+                style="@style/AndorsTrail_Style_LightFrame"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:paddingTop="8dp"
-                android:paddingBottom="8dp"
+                android:gravity="center"
+                android:padding="10dp"
+                android:textColor="?attr/ui_theme_textbutton_textcolor_color"
                 android:textIsSelectable="true"
-                android:textSize="18sp"
+                android:textSize="22sp"
                 android:textStyle="bold" />
 
             <TextView
@@ -195,11 +197,16 @@
 
         <EditText
             android:id="@+id/combatview_anki_input"
+            style="@style/AndorsTrail_Style_LightFrame"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
             android:hint="Type answer"
+            android:hintTextColor="?attr/ui_theme_palette_text_gray_mid_color"
             android:inputType="text"
+            android:padding="10dp"
             android:singleLine="true"
+            android:textColor="?attr/ui_theme_textbutton_textcolor_color"
             android:textSize="18sp" />
 
         <Button
