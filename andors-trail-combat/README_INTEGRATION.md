@@ -27,3 +27,5 @@ Use these branches as the maintained pair:
 - Andor's Trail integration: `chatgpt/andors-trail-anki-resilient`
 
 Future integration edits should preserve the package/authority values above.
+
+<!-- UI playground build trigger: themed question/input iteration -->
