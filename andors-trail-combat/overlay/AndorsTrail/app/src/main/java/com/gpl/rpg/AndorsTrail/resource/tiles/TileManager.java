@@ -116,6 +116,7 @@ public final class TileManager {
 	private Bitmap heroEquipmentLayers;
 	private Bitmap heroEquipmentMasks;
 	private Bitmap heroEquipmentBase;
+	private Bitmap heroTwoHandClearMask;
 	private Bitmap playerAppearanceBitmap;
 	private String playerAppearanceSignature;
 	private final HashMap<String, Bitmap> equipmentLayerCache = new HashMap<String, Bitmap>();
@@ -140,6 +141,13 @@ public final class TileManager {
 			heroEquipmentBase = BitmapFactory.decodeResource(res, R.drawable.hero_equipment_base);
 		}
 		return heroEquipmentBase;
+	}
+
+	private Bitmap getHeroTwoHandClearMask(Resources res) {
+		if (heroTwoHandClearMask == null) {
+			heroTwoHandClearMask = BitmapFactory.decodeResource(res, R.drawable.hero_twohand_clear_mask);
+		}
+		return heroTwoHandClearMask;
 	}
 
 	private boolean hasVisiblePixels(Bitmap bitmap) {
@@ -396,10 +404,17 @@ public final class TileManager {
 				int r = Color.red(marker);
 				int g = Color.green(marker);
 				int b = Color.blue(marker);
-				boolean secondaryMarker = r > 120 && b > 120 && g < 180 && r > g + 45 && b > g + 45;
-				int baseColor = secondaryMarker ? palette[1] : palette[0];
+				boolean skinMarker = g > r + 60 && g > b + 60;
+				boolean secondaryMarker = !skinMarker && r > 120 && b > 120 && g < 180
+						&& r > g + 45 && b > g + 45;
+				int baseColor = skinMarker ? Color.rgb(215, 131, 92)
+						: (secondaryMarker ? palette[1] : palette[0]);
 				float factor;
-				if (secondaryMarker) {
+				if (skinMarker) {
+					if (g < 90) factor = 0.62f;
+					else if (g > 205) factor = 1.18f;
+					else factor = 1.0f;
+				} else if (secondaryMarker) {
 					if (r < 180) factor = 0.58f;
 					else if (g > 80) factor = 1.28f;
 					else factor = 0.95f;
@@ -451,13 +466,23 @@ public final class TileManager {
 		if (layer != null) canvas.drawBitmap(layer, 0, 0, paint);
 	}
 
+	private void clearTwoHandSideHands(Canvas canvas, Resources res) {
+		Bitmap mask = getHeroTwoHandClearMask(res);
+		if (mask == null) return;
+		Paint clearPaint = new Paint();
+		clearPaint.setFilterBitmap(false);
+		clearPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
+		canvas.drawBitmap(mask, 0, 0, clearPaint);
+		clearPaint.setXfermode(null);
+	}
+
 	private Bitmap buildPlayerAppearance(Resources res, Player player) {
 		Bitmap result = Bitmap.createBitmap(HERO_EQUIPMENT_TILE_SIZE, HERO_EQUIPMENT_TILE_SIZE, Bitmap.Config.ARGB_8888);
 		Canvas canvas = new Canvas(result);
 		Paint paint = new Paint();
 		paint.setFilterBitmap(false);
 
-		if (player.iconID == CHAR_HERO_0) {
+		if (player.iconID <= LAST_HERO) {
 			Bitmap base = getHeroEquipmentBase(res);
 			if (hasVisiblePixels(base)) {
 				canvas.drawBitmap(base, null,
@@ -498,22 +523,40 @@ public final class TileManager {
 		drawHeroEquipmentLayer(canvas, res, paint, getHandLayer(hands), hands, false, true);
 		drawHeroEquipmentLayer(canvas, res, paint, getHeadLayer(head, player), head, false, true);
 
-		// Off-hand equipment sits behind the main-hand weapon so the silhouette
-		// stays readable when both occupy nearby pixels.
-		if (offHand != null && offHand.isWeapon()) {
-			int offWeaponLayer = getWeaponLayer(offHand);
-			if (offWeaponLayer < 0) offWeaponLayer = 22;
-			drawHeroEquipmentLayer(canvas, res, paint, offWeaponLayer, offHand, true, false);
-		} else if (offHand != null) {
-			int shieldLayer = getShieldLayer(offHand);
-			if (shieldLayer < 0 && offHand.isShield()) shieldLayer = 39;
-			drawHeroEquipmentLayer(canvas, res, paint, shieldLayer, offHand, false, false);
+		final boolean twoHandedMain = mainHand != null && mainHand.isTwohandWeapon();
+
+		// A normal weapon slot is the character's right hand, which is viewer-left
+		// on this front-facing sprite. Mirroring that same weapon art puts an
+		// off-hand weapon in the character's left hand (viewer-right). Shields
+		// are authored directly on viewer-right because they belong to the shield slot.
+		if (!twoHandedMain) {
+			if (offHand != null && offHand.isWeapon()) {
+				int offWeaponLayer = getWeaponLayer(offHand);
+				if (offWeaponLayer < 0) offWeaponLayer = 22;
+				drawHeroEquipmentLayer(canvas, res, paint, offWeaponLayer, offHand, true, false);
+			} else if (offHand != null) {
+				int shieldLayer = getShieldLayer(offHand);
+				if (shieldLayer < 0 && offHand.isShield()) shieldLayer = 39;
+				drawHeroEquipmentLayer(canvas, res, paint, shieldLayer, offHand, false, false);
+			}
 		}
 
 		if (mainHand != null) {
 			int mainWeaponLayer = getWeaponLayer(mainHand);
 			if (mainWeaponLayer < 0 && mainHand.isWeapon()) mainWeaponLayer = 25;
-			drawHeroEquipmentLayer(canvas, res, paint, mainWeaponLayer, mainHand, false, false);
+			if (twoHandedMain) {
+				// Two-handed categories use a centered diagonal pose. Remove the
+				// relaxed side-hands first so the sprite never appears to have
+				// extra arms, then draw both gripping hands on the weapon.
+				clearTwoHandSideHands(canvas, res);
+				drawHeroEquipmentLayer(canvas, res, paint, mainWeaponLayer, mainHand, false, false);
+				if (hands != null) {
+					// Repaint the two grip points using the equipped glove palette.
+					drawHeroEquipmentLayer(canvas, res, paint, 45, hands, false, false);
+				}
+			} else {
+				drawHeroEquipmentLayer(canvas, res, paint, mainWeaponLayer, mainHand, false, false);
+			}
 		}
 
 		// A corrupt or unsupported equipment resource must never make the player invisible.
