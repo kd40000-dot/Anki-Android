@@ -194,6 +194,17 @@ public final class TileManager {
 	}
 
 	private int getBodyLayer(ItemType type, Player player) {
+		if (type == null) return -1;
+		String id = type.id;
+		// Pass 0: Crossglen/Fallhaven item-specific body silhouettes.
+		if ("kids_shirt".equals(id)) return 46;
+		if ("shirt1".equals(id)) return 47;
+		if ("shirt2".equals(id)) return 48;
+		if ("shirt_torn".equals(id)) return 49;
+		if ("shirt_weathered".equals(id)) return 50;
+		if ("shirt_patched_cloth".equals(id)) return 51;
+		if ("shirt_dmgresist".equals(id)) return 52;
+
 		String category = categoryID(type);
 		String text = itemText(type, player);
 		if ("bdy_clth".equals(category)) {
@@ -216,6 +227,10 @@ public final class TileManager {
 	}
 
 	private int getHeadLayer(ItemType type, Player player) {
+		if (type == null) return -1;
+		if ("hat1".equals(type.id)) return 53;
+		if ("hat2".equals(type.id)) return 54;
+
 		String category = categoryID(type);
 		String text = itemText(type, player);
 		if ("hd_cloth".equals(category)) {
@@ -230,6 +245,17 @@ public final class TileManager {
 	}
 
 	private int getHandLayer(ItemType type) {
+		if (type == null) return -1;
+		String id = type.id;
+		if ("kids_gloves".equals(id) || "gloves_crude_cloth".equals(id)) return 55;
+		if ("gloves_fancy".equals(id)) return 56;
+		if ("gloves_fumbling".equals(id)) return 57;
+		if ("used_gloves".equals(id)) return 58;
+		if ("gloves_barbrawler".equals(id)) return 59;
+		if ("gloves_attack1".equals(id)) return 60;
+		if ("gloves_grip".equals(id)) return 61;
+		if ("gloves_critical".equals(id)) return 62;
+
 		String category = categoryID(type);
 		if ("hnd_cloth".equals(category)) return 14;
 		if ("hnd_lthr".equals(category)) return 15;
@@ -239,6 +265,14 @@ public final class TileManager {
 	}
 
 	private int getFeetLayer(ItemType type) {
+		if (type == null) return -1;
+		String id = type.id;
+		if ("boots_sewn".equals(id)) return 63;
+		if ("boots_crude_leather".equals(id)) return 64;
+		if ("boots1".equals(id)) return 65;
+		if ("boots2".equals(id)) return 66;
+		if ("boots3".equals(id)) return 67;
+
 		String category = categoryID(type);
 		if ("feet_clth".equals(category)) return 18;
 		if ("feet_lthr".equals(category)) return 19;
@@ -248,6 +282,30 @@ public final class TileManager {
 	}
 
 	private int getWeaponLayer(ItemType type) {
+		if (type == null) return -1;
+		String id = type.id;
+		// Pass 0: Crossglen/Fallhaven weapons use item-specific 32x32 art.
+		if ("dagger0".equals(id)) return 73;
+		if ("dagger1".equals(id)) return 74;
+		if ("dagger_sharp_steel".equals(id)) return 75;
+		if ("club1".equals(id)) return 76;
+		if ("club3".equals(id)) return 77;
+		if ("ironsword0".equals(id)) return 78;
+		if ("rusted_iron_sword".equals(id)) return 79;
+		if ("ironsword1".equals(id)) return 80;
+		if ("ironsword2".equals(id)) return 81;
+		if ("longsword_hard_iron".equals(id)) return 82;
+		if ("shortsword1".equals(id)) return 83;
+		if ("broadsword1".equals(id)) return 84;
+		if ("axe2".equals(id)) return 85;
+		if ("axe_black1".equals(id)) return 86;
+		if ("hammer0".equals(id)) return 87;
+		if ("qtrstaff".equals(id)) return 88;
+		if ("clmr_rst".equals(id)) return 89;
+		if ("clmr_irn1".equals(id)) return 90;
+		if ("spear_rusty".equals(id)) return 91;
+		if ("spear_iron".equals(id)) return 92;
+
 		String category = categoryID(type);
 		if ("dagger".equals(category)) return 22;
 		if ("ssword".equals(category)) return 23;
@@ -268,6 +326,14 @@ public final class TileManager {
 	}
 
 	private int getShieldLayer(ItemType type) {
+		if (type == null) return -1;
+		String id = type.id;
+		if ("broken_buckler".equals(id)) return 68;
+		if ("shield_crude_wooden".equals(id)) return 69;
+		if ("shield_cracked_wooden".equals(id)) return 70;
+		if ("shield_wooden_buckler".equals(id)) return 71;
+		if ("shield3".equals(id)) return 72;
+
 		String category = categoryID(type);
 		if ("buckler".equals(category)) return 37;
 		if ("shld_wd_li".equals(category)) return 38;
@@ -278,6 +344,17 @@ public final class TileManager {
 		if (category != null && category.startsWith("shld_wd")) return 40;
 		if (category != null && category.startsWith("shld_")) return 41;
 		return -1;
+	}
+
+	private boolean isAppearanceTwoHanded(ItemType type) {
+		if (type == null) return false;
+		if (type.isTwohandWeapon()) return true;
+		String id = type.id;
+		return "qtrstaff".equals(id)
+				|| "clmr_rst".equals(id)
+				|| "clmr_irn1".equals(id)
+				|| "spear_rusty".equals(id)
+				|| "spear_iron".equals(id);
 	}
 
 	private int clampColor(int value) {
@@ -523,7 +600,7 @@ public final class TileManager {
 		drawHeroEquipmentLayer(canvas, res, paint, getHandLayer(hands), hands, false, true);
 		drawHeroEquipmentLayer(canvas, res, paint, getHeadLayer(head, player), head, false, true);
 
-		final boolean twoHandedMain = mainHand != null && mainHand.isTwohandWeapon();
+		final boolean twoHandedMain = isAppearanceTwoHanded(mainHand);
 
 		// A normal weapon slot is the character's right hand, which is viewer-left
 		// on this front-facing sprite. Mirroring that same weapon art puts an
