@@ -2,6 +2,7 @@ package com.balthazar.kittenswear;
 
 import android.app.PendingIntent;
 import android.content.Intent;
+import android.os.RemoteException;
 import androidx.wear.protolayout.expression.DynamicBuilders;
 import androidx.wear.watchface.complications.data.*;
 import androidx.wear.watchface.complications.datasource.*;
@@ -11,23 +12,27 @@ import java.util.Locale;
 public class KittensComplicationService extends ComplicationDataSourceService {
  @Override public void onComplicationRequest(ComplicationRequest request,ComplicationRequestListener listener){
   ComplicationStore.ResourceInfo r=ComplicationStore.selectedInfo(this);
-  if(r==null){listener.onComplicationData(buildStatic(request.getComplicationType(),"Open","Kittens","Open Kittens Wear to sync resources"));return;}
+  if(r==null){deliver(listener,buildStatic(request.getComplicationType(),"Open","Kittens","Open Kittens Wear to sync resources"));return;}
   double projected=r.projected(System.currentTimeMillis());
   String fallback=shortNumber(projected);String desc=r.title+" "+fallback+(r.max>0?" of "+shortNumber(r.max):"");
   ComplicationText dynamicText=dynamicValueText(r,fallback);
   PendingIntent tap=PendingIntent.getActivity(this,0,new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TOP),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
   ComplicationType type=request.getComplicationType();
   if(ComplicationType.RANGED_VALUE.equals(type)){
-   listener.onComplicationData(buildRanged(r,projected,dynamicText,desc,tap));
+   deliver(listener,buildRanged(r,projected,dynamicText,desc,tap));
   } else if(ComplicationType.LONG_TEXT.equals(type)){
    String longFallback=r.title+" "+fallback+(r.max>0?" / "+shortNumber(r.max):"");
    ComplicationText longDynamic=dynamicLongText(r,longFallback);
-   listener.onComplicationData(new LongTextComplicationData.Builder(longDynamic,new PlainComplicationText.Builder(desc).build()).setTapAction(tap).build());
+   deliver(listener,new LongTextComplicationData.Builder(longDynamic,new PlainComplicationText.Builder(desc).build()).setTapAction(tap).build());
   } else {
-   listener.onComplicationData(new ShortTextComplicationData.Builder(dynamicText,new PlainComplicationText.Builder(desc).build()).setTitle(new PlainComplicationText.Builder(shortTitle(r.title)).build()).setTapAction(tap).build());
+   deliver(listener,new ShortTextComplicationData.Builder(dynamicText,new PlainComplicationText.Builder(desc).build()).setTitle(new PlainComplicationText.Builder(shortTitle(r.title)).build()).setTapAction(tap).build());
   }
  }
  @Override public ComplicationData getPreviewData(ComplicationType type){return buildStatic(type,"1.2K","Catnip","Catnip 1.2K");}
+
+ private static void deliver(ComplicationRequestListener listener,ComplicationData data){
+  try{listener.onComplicationData(data);}catch(RemoteException ignored){}
+ }
 
  private ComplicationData buildStatic(ComplicationType type,String value,String title,String desc){
   PendingIntent tap=PendingIntent.getActivity(this,0,new Intent(this,MainActivity.class),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
