@@ -6,8 +6,8 @@ android {
   applicationId 'com.balthazar.kittenswear'
   minSdk 33
   targetSdk 34
-  versionCode 3
-  versionName '1.1.1'
+  versionCode 4
+  versionName '1.1.2'
   ndk { abiFilters.addAll(project.hasProperty('emulatorBuild') ? ['x86_64'] : ['arm64-v8a', 'armeabi-v7a']) }
  }
  signingConfigs { personal { storeFile file('../personal.jks'); storePassword System.getenv('KITTENS_KEYSTORE_PASSWORD'); keyAlias 'kittens'; keyPassword System.getenv('KITTENS_KEYSTORE_PASSWORD') } }
