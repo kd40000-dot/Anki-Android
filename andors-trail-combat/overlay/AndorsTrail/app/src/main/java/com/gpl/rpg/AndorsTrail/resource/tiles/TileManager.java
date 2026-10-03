@@ -116,10 +116,10 @@ public final class TileManager {
 	private Bitmap heroEquipmentLayers;
 	private Bitmap heroEquipmentMasks;
 	private Bitmap heroEquipmentBase;
-	private Bitmap heroKidsShirtModel;
 	private Bitmap heroTwoHandClearMask;
 	private Bitmap playerAppearanceBitmap;
 	private String playerAppearanceSignature;
+	private final HashMap<String, Bitmap> directHeroSpriteCache = new HashMap<String, Bitmap>();
 	private final HashMap<String, Bitmap> equipmentLayerCache = new HashMap<String, Bitmap>();
 	private final HashMap<String, int[]> equipmentPaletteCache = new HashMap<String, int[]>();
 
@@ -144,11 +144,73 @@ public final class TileManager {
 		return heroEquipmentBase;
 	}
 
-	private Bitmap getHeroKidsShirtModel(Resources res) {
-		if (heroKidsShirtModel == null) {
-			heroKidsShirtModel = BitmapFactory.decodeResource(res, R.drawable.hero_kids_shirt_model);
+	private String directHeroToken(ItemType type) {
+		if (type == null || type.id == null) return "";
+		return type.id.toLowerCase().replaceAll("[^a-z0-9_]", "_");
+	}
+
+	private Bitmap getDirectHeroSprite(Resources res, String resourceName) {
+		if (directHeroSpriteCache.containsKey(resourceName)) {
+			return directHeroSpriteCache.get(resourceName);
 		}
-		return heroKidsShirtModel;
+		Bitmap bitmap = null;
+		try {
+			int resourceID = R.drawable.class.getField(resourceName).getInt(null);
+			bitmap = BitmapFactory.decodeResource(res, resourceID);
+		} catch (Exception ignored) {
+			// Missing direct art is expected. Fall back to the generic equipment renderer.
+		}
+		directHeroSpriteCache.put(resourceName, bitmap);
+		return bitmap;
+	}
+
+	private Bitmap getDirectEquipmentSprite(Resources res, String slot, ItemType type) {
+		if (type == null) return null;
+		return getDirectHeroSprite(res, "hero_direct_" + slot + "_" + directHeroToken(type));
+	}
+
+	private Bitmap getDirectEquipmentMask(Resources res, String slot, ItemType type) {
+		if (type == null) return null;
+		return getDirectHeroSprite(res, "hero_direct_mask_" + slot + "_" + directHeroToken(type));
+	}
+
+	private Bitmap getDirectBodyHandCombo(Resources res, ItemType body, ItemType hands) {
+		if (body == null || hands == null) return null;
+		return getDirectHeroSprite(res, "hero_direct_combo_body_" + directHeroToken(body)
+				+ "_hand_" + directHeroToken(hands));
+	}
+
+	private void drawBitmapPossiblyMirrored(Canvas canvas, Bitmap bitmap, Paint paint, boolean mirror) {
+		if (bitmap == null) return;
+		if (mirror) {
+			canvas.save();
+			canvas.scale(-1f, 1f, HERO_EQUIPMENT_TILE_SIZE / 2f, HERO_EQUIPMENT_TILE_SIZE / 2f);
+			canvas.drawBitmap(bitmap, 0, 0, paint);
+			canvas.restore();
+		} else {
+			canvas.drawBitmap(bitmap, 0, 0, paint);
+		}
+	}
+
+	private void clearDirectMask(Canvas canvas, Bitmap mask, boolean mirror) {
+		if (!hasVisiblePixels(mask)) return;
+		Paint clearPaint = new Paint();
+		clearPaint.setFilterBitmap(false);
+		clearPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
+		drawBitmapPossiblyMirrored(canvas, mask, clearPaint, mirror);
+		clearPaint.setXfermode(null);
+	}
+
+	private boolean drawDirectEquipmentLayer(Canvas canvas, Resources res, Paint paint,
+			String slot, ItemType type, boolean mirror, boolean replaceCoveredBase) {
+		Bitmap layer = getDirectEquipmentSprite(res, slot, type);
+		if (!hasVisiblePixels(layer)) return false;
+		if (replaceCoveredBase) {
+			Bitmap mask = getDirectEquipmentMask(res, slot, type);
+			clearDirectMask(canvas, hasVisiblePixels(mask) ? mask : layer, mirror);
+		}
+		drawBitmapPossiblyMirrored(canvas, layer, paint, mirror);
+		return true;
 	}
 
 	private Bitmap getHeroTwoHandClearMask(Resources res) {
@@ -568,11 +630,21 @@ public final class TileManager {
 		paint.setFilterBitmap(false);
 
 		ItemType body = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.body);
-		final boolean useExactKidsShirtModel = player.iconID <= LAST_HERO
-				&& body != null && "kids_shirt".equals(body.id);
+		ItemType feet = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.feet);
+		ItemType hands = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.hand);
+		ItemType head = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.head);
+		ItemType mainHand = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.weapon);
+		ItemType offHand = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.shield);
 
+		boolean directBodyHandled = false;
+		boolean directHandsHandled = false;
 		if (player.iconID <= LAST_HERO) {
-			Bitmap base = useExactKidsShirtModel ? getHeroKidsShirtModel(res) : getHeroEquipmentBase(res);
+			Bitmap combo = getDirectBodyHandCombo(res, body, hands);
+			Bitmap base = hasVisiblePixels(combo) ? combo : getHeroEquipmentBase(res);
+			if (hasVisiblePixels(combo)) {
+				directBodyHandled = true;
+				directHandsHandled = true;
+			}
 			if (hasVisiblePixels(base)) {
 				canvas.drawBitmap(base, null,
 						new Rect(0, 0, HERO_EQUIPMENT_TILE_SIZE, HERO_EQUIPMENT_TILE_SIZE), paint);
@@ -597,21 +669,28 @@ public final class TileManager {
 			}
 		}
 
-		ItemType feet = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.feet);
-		ItemType hands = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.hand);
-		ItemType head = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.head);
-		ItemType mainHand = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.weapon);
-		ItemType offHand = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.shield);
-
-		// Armor pieces replace only the body pixels they physically cover.
-		// A shirt cannot erase the head or hands, gloves stay on the hands,
-		// boots stay on the lower legs/feet, and body armor stops around the hips.
-		if (!useExactKidsShirtModel) {
-			drawHeroEquipmentLayer(canvas, res, paint, getBodyLayer(body, player), body, false, true);
+		// Direct 32x32 assets are preferred for rapid sprite iteration. Resource names are
+		// derived from the real item ID, so adding or replacing approved artwork usually
+		// requires only PNG changes, not another TileManager edit. Missing direct art
+		// transparently falls back to the existing category/item renderer.
+		if (!directBodyHandled) {
+			directBodyHandled = drawDirectEquipmentLayer(canvas, res, paint, "body", body, false, true);
+			if (!directBodyHandled) {
+				drawHeroEquipmentLayer(canvas, res, paint, getBodyLayer(body, player), body, false, true);
+			}
 		}
-		drawHeroEquipmentLayer(canvas, res, paint, getFeetLayer(feet), feet, false, true);
-		drawHeroEquipmentLayer(canvas, res, paint, getHandLayer(hands), hands, false, true);
-		drawHeroEquipmentLayer(canvas, res, paint, getHeadLayer(head, player), head, false, true);
+		if (!drawDirectEquipmentLayer(canvas, res, paint, "feet", feet, false, true)) {
+			drawHeroEquipmentLayer(canvas, res, paint, getFeetLayer(feet), feet, false, true);
+		}
+		if (!directHandsHandled) {
+			directHandsHandled = drawDirectEquipmentLayer(canvas, res, paint, "hand", hands, false, true);
+			if (!directHandsHandled) {
+				drawHeroEquipmentLayer(canvas, res, paint, getHandLayer(hands), hands, false, true);
+			}
+		}
+		if (!drawDirectEquipmentLayer(canvas, res, paint, "head", head, false, true)) {
+			drawHeroEquipmentLayer(canvas, res, paint, getHeadLayer(head, player), head, false, true);
+		}
 
 		final boolean twoHandedMain = isAppearanceTwoHanded(mainHand);
 
@@ -623,11 +702,15 @@ public final class TileManager {
 			if (offHand != null && offHand.isWeapon()) {
 				int offWeaponLayer = getWeaponLayer(offHand);
 				if (offWeaponLayer < 0) offWeaponLayer = 22;
-				drawHeroEquipmentLayer(canvas, res, paint, offWeaponLayer, offHand, true, false);
+				if (!drawDirectEquipmentLayer(canvas, res, paint, "weapon", offHand, true, false)) {
+					drawHeroEquipmentLayer(canvas, res, paint, offWeaponLayer, offHand, true, false);
+				}
 			} else if (offHand != null) {
 				int shieldLayer = getShieldLayer(offHand);
 				if (shieldLayer < 0 && offHand.isShield()) shieldLayer = 39;
-				drawHeroEquipmentLayer(canvas, res, paint, shieldLayer, offHand, false, false);
+				if (!drawDirectEquipmentLayer(canvas, res, paint, "shield", offHand, false, false)) {
+					drawHeroEquipmentLayer(canvas, res, paint, shieldLayer, offHand, false, false);
+				}
 			}
 		}
 
@@ -639,13 +722,17 @@ public final class TileManager {
 				// relaxed side-hands first so the sprite never appears to have
 				// extra arms, then draw both gripping hands on the weapon.
 				clearTwoHandSideHands(canvas, res);
-				drawHeroEquipmentLayer(canvas, res, paint, mainWeaponLayer, mainHand, false, false);
+				if (!drawDirectEquipmentLayer(canvas, res, paint, "weapon", mainHand, false, false)) {
+					drawHeroEquipmentLayer(canvas, res, paint, mainWeaponLayer, mainHand, false, false);
+				}
 				if (hands != null) {
 					// Repaint the two grip points using the equipped glove palette.
 					drawHeroEquipmentLayer(canvas, res, paint, 45, hands, false, false);
 				}
 			} else {
-				drawHeroEquipmentLayer(canvas, res, paint, mainWeaponLayer, mainHand, false, false);
+				if (!drawDirectEquipmentLayer(canvas, res, paint, "weapon", mainHand, false, false)) {
+					drawHeroEquipmentLayer(canvas, res, paint, mainWeaponLayer, mainHand, false, false);
+				}
 			}
 		}
 

@@ -21,6 +21,10 @@ jobs:
     steps:
       - name: Checkout integration files
         uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            andors-trail-combat
+            tools
 
       - name: Checkout current Andor's Trail upstream
         uses: actions/checkout@v5
@@ -28,6 +32,7 @@ jobs:
           repository: AndorsTrailRelease/andors-trail
           ref: master
           path: andors-upstream
+          sparse-checkout: AndorsTrail
 
       - name: Apply combat integration overlay
         run: cp -a andors-trail-combat/overlay/. andors-upstream/
