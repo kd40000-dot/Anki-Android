@@ -48,8 +48,9 @@ final class LocalGameServer {
     ComplicationStore.saveSnapshot(context,new String(data,StandardCharsets.UTF_8));data="{\"ok\":true}".getBytes(StandardCharsets.UTF_8);
    }else if(request[0].equals("POST")&&path.equals("/open-complication-settings")){
     android.content.Intent intent=new android.content.Intent(context,ComplicationConfigActivity.class).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);context.startActivity(intent);data="{\"ok\":true}".getBytes(StandardCharsets.UTF_8);
-   }else if(request[0].equals("POST")&&path.equals("/backup")){
-    byte[] body=in.readNBytes(length);if(body.length!=length)throw new IOException("Incomplete save body");data=manualSave(body).getBytes(StandardCharsets.UTF_8);
+   }else if(request[0].equals("POST")&&(path.equals("/backup")||path.equals("/save-manual"))){
+    byte[] body=in.readNBytes(length);if(body.length!=length)throw new IOException("Incomplete save body");
+    data=(path.equals("/save-manual")?manualSave(body):internalSave(body)).getBytes(StandardCharsets.UTF_8);
    }else if(request[0].equals("POST")&&path.equals("/export")){
     byte[] body=in.readNBytes(length);if(body.length!=length)throw new IOException("Incomplete export body");
     org.json.JSONObject parsed=new org.json.JSONObject(new String(body,StandardCharsets.UTF_8));
@@ -76,6 +77,14 @@ final class LocalGameServer {
    }
    reply(s,200,type,data);
   }catch(Exception e){try{reply(socket,500,"application/json",errorJson("server",e,"Request processing failed").getBytes(StandardCharsets.UTF_8));}catch(Exception ignored){}}
+ }
+ private String internalSave(byte[] body){
+  try{
+   AtomicFile f=new AtomicFile(backup());FileOutputStream out=null;
+   try{out=f.startWrite();out.write(body);f.finishWrite(out);}
+   catch(IOException e){if(out!=null)f.failWrite(out);throw e;}
+   return "{\"state\":\"success\",\"internal\":true}";
+  }catch(Exception e){return errorJson("background-save",e,"Internal atomic backup failed");}
  }
  private String manualSave(byte[] body){
   boolean internal=false,visible=false;String name="";StringBuilder errors=new StringBuilder();
