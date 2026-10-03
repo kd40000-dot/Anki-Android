@@ -1,6 +1,8 @@
 package com.balthazar.kittenswear;
 
 import android.content.ContentResolver;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.ContentValues;
 import android.content.Context;
 import android.net.Uri;
@@ -54,20 +56,13 @@ final class LocalGameServer {
    }else if(request[0].equals("POST")&&path.equals("/export")){
     byte[] body=in.readNBytes(length);if(body.length!=length)throw new IOException("Incomplete export body");
     org.json.JSONObject parsed=new org.json.JSONObject(new String(body,StandardCharsets.UTF_8));
-    pendingExport=parsed.getString("exportText").getBytes(StandardCharsets.UTF_8);
-    exportState="{\"state\":\"waiting\",\"message\":\"Waiting for save location\"}";
-    String suggested="KittensGame_"+timestamp()+".txt";
-    MainActivity a=MainActivity.current();if(a==null)throw new IllegalStateException("MainActivity is not active; reopen Kittens Wear and try again.");
-    a.openCreateDocument(suggested);
-    data=("{\"state\":\"waiting\",\"suggestedName\":\""+esc(suggested)+"\"}").getBytes(StandardCharsets.UTF_8);
-   }else if(path.equals("/export-status")){
-    data=exportState.getBytes(StandardCharsets.UTF_8);
-   }else if(request[0].equals("POST")&&path.equals("/import")){
-    importState="{\"state\":\"waiting\",\"message\":\"Waiting for file selection\"}";
-    MainActivity a=MainActivity.current();if(a==null)throw new IllegalStateException("MainActivity is not active; reopen Kittens Wear and try again.");
-    a.openImportDocument();data="{\"state\":\"waiting\"}".getBytes(StandardCharsets.UTF_8);
-   }else if(path.equals("/import-status")){
-    data=importState.getBytes(StandardCharsets.UTF_8);
+    data=copyClipboard(parsed.getString("exportText")).getBytes(StandardCharsets.UTF_8);
+   }else if(request[0].equals("POST")&&path.equals("/clipboard-copy")){
+    byte[] body=in.readNBytes(length);if(body.length!=length)throw new IOException("Incomplete clipboard body");
+    org.json.JSONObject parsed=new org.json.JSONObject(new String(body,StandardCharsets.UTF_8));
+    data=copyClipboard(parsed.getString("text")).getBytes(StandardCharsets.UTF_8);
+   }else if(path.equals("/clipboard-read")){
+    data=readClipboard().getBytes(StandardCharsets.UTF_8);
    }else if(path.equals("/restore")){
     AtomicFile f=new AtomicFile(backup());data=f.getBaseFile().exists()?f.readFully():"null".getBytes(StandardCharsets.UTF_8);
    }else{
@@ -77,6 +72,27 @@ final class LocalGameServer {
    }
    reply(s,200,type,data);
   }catch(Exception e){try{reply(socket,500,"application/json",errorJson("server",e,"Request processing failed").getBytes(StandardCharsets.UTF_8));}catch(Exception ignored){}}
+ }
+ private String copyClipboard(String text){
+  try{
+   if(text==null||text.isEmpty())throw new IllegalArgumentException("Save text is empty.");
+   ClipboardManager cm=(ClipboardManager)context.getSystemService(Context.CLIPBOARD_SERVICE);
+   if(cm==null)throw new IllegalStateException("Android ClipboardManager service is unavailable.");
+   cm.setPrimaryClip(ClipData.newPlainText("Kittens Game save",text));
+   return "{\"state\":\"success\",\"characters\":"+text.length()+",\"message\":\"Copied to Android clipboard\"}";
+  }catch(Throwable e){return errorJson("clipboard-copy",e,"The save text is still available in the on-screen export box for manual copying.");}
+ }
+ private String readClipboard(){
+  try{
+   ClipboardManager cm=(ClipboardManager)context.getSystemService(Context.CLIPBOARD_SERVICE);
+   if(cm==null)throw new IllegalStateException("Android ClipboardManager service is unavailable.");
+   if(!cm.hasPrimaryClip()||cm.getPrimaryClip()==null||cm.getPrimaryClip().getItemCount()==0)throw new IllegalStateException("Android clipboard is empty.");
+   CharSequence value=cm.getPrimaryClip().getItemAt(0).coerceToText(context);
+   if(value==null||value.length()==0)throw new IllegalStateException("Clipboard contains no text.");
+   String text=value.toString();
+   if(text.length()>MAX_BODY)throw new IOException("Clipboard text exceeds the "+MAX_BODY+" character import limit.");
+   return "{\"state\":\"success\",\"characters\":"+text.length()+",\"text\":\""+esc(text)+"\"}";
+  }catch(Throwable e){return errorJson("clipboard-read",e,"You can still long-press the import box and paste using the keyboard or system paste command.");}
  }
  private String internalSave(byte[] body){
   try{
