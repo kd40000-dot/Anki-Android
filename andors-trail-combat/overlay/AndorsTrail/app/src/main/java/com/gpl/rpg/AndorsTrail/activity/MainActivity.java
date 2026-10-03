@@ -225,6 +225,9 @@ public final class MainActivity
 			// It's possible the pause() quicksave was deferred because the map was in transition.  If
 			// so, we do it now so the new map is saved.
 			saveDeferredQuicksaveIfNeeded();
+			if (world.tileManager.refreshPlayerAppearanceIfChanged(getResources(), world)) {
+				mainview.invalidate();
+			}
 			updateStatus();
 		}
 	}
@@ -372,7 +375,11 @@ public final class MainActivity
 
 
 	@Override
-	public void onPlayerMoved(PredefinedMap map, Coord newPosition, Coord previousPosition) { }
+	public void onPlayerMoved(PredefinedMap map, Coord newPosition, Coord previousPosition) {
+		if (world.tileManager.refreshPlayerAppearanceIfChanged(getResources(), world)) {
+			mainview.invalidate();
+		}
+	}
 
 	@Override
 	public void onPlayerEnteredNewMap(PredefinedMap map, Coord p) {

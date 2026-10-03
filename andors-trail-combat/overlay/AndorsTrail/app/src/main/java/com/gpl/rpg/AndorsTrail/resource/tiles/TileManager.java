@@ -680,9 +680,6 @@ public final class TileManager {
 
 		Bitmap mainhandSprite = HeroSpriteHotSwap.loadItemSprite(HeroSpriteHotSwap.FOLDER_MAINHAND, mainHand, player);
 		if (hasVisiblePixels(mainhandSprite)) {
-			if (isAppearanceTwoHanded(mainHand)) {
-				clearTwoHandSideHands(canvas, res);
-			}
 			canvas.drawBitmap(mainhandSprite, 0, 0, paint);
 		}
 
@@ -867,6 +864,19 @@ public final class TileManager {
 					tileID_placeholder_hero,
 					getPlayerAppearanceBitmap(res, world.model.player));
 		}
+	}
+
+	public boolean refreshPlayerAppearanceIfChanged(Resources res, WorldContext world) {
+		if (world == null || world.model == null || world.model.player == null) return false;
+		String signature = getPlayerAppearanceSignature(world.model.player);
+		if (signature.equals(playerAppearanceSignature) && playerAppearanceBitmap != null) return false;
+
+		playerAppearanceBitmap = buildPlayerAppearance(res, world.model.player);
+		playerAppearanceSignature = signature;
+		if (world.model.currentMaps != null && world.model.currentMaps.tiles != null) {
+			world.model.currentMaps.tiles.setBitmap(tileID_placeholder_hero, playerAppearanceBitmap);
+		}
+		return true;
 	}
 
 	public TileCollection loadTilesFor(Collection<Integer> tileIDs, Resources r) {

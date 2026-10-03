@@ -12,9 +12,6 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.Canvas;
-import android.graphics.Paint;
-import android.graphics.Rect;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -138,8 +135,8 @@ public final class HeroSpriteHotSwap {
 		if (readme.exists()) return;
 		String text =
 				"Andor's Trail sprite hot-swap folder\n\n" +
-				"Use transparent PNG files. 32x32 is the native size. Larger images are fit into " +
-				"a 32x32 canvas without changing their aspect ratio.\n\n" +
+				"Use transparent 32x32 PNG files. Sprites are loaded pixel-for-pixel and are never resized.\n" +
+				"Files with any other dimensions are ignored so the game cannot distort your art.\n\n" +
 				"Base/Base.png\n" +
 				"Headwear/<exact in-game item name>.png\n" +
 				"Armor/<exact in-game item name>.png\n" +
@@ -170,18 +167,41 @@ public final class HeroSpriteHotSwap {
 		if (png.isFile()) return png;
 		File bare = new File(dir, safe);
 		if (bare.isFile()) return bare;
+
+		// Be forgiving about filename case while still matching the exact in-game name.
+		File[] files = dir.listFiles();
+		if (files != null) {
+			String wantedPng = (safe + ".png").toLowerCase();
+			String wantedBare = safe.toLowerCase();
+			for (File candidate : files) {
+				if (!candidate.isFile()) continue;
+				String name = candidate.getName().toLowerCase();
+				if (name.equals(wantedPng) || name.equals(wantedBare)) return candidate;
+			}
+		}
 		return null;
 	}
 
 	private static File resolveItemFile(String folder, ItemType type, Player player) {
 		if (type == null) return null;
-		String name = type.getName(player);
-		return resolveNamedFile(folder, name);
+		File byDisplayName = resolveNamedFile(folder, type.getName(player));
+		if (byDisplayName != null) return byDisplayName;
+		// Item IDs are also accepted as a fallback, useful if the game is running in another language.
+		return resolveNamedFile(folder, type.id);
 	}
 
 	private static File resolveBaseFile() {
 		File file = resolveNamedFile(FOLDER_BASE, "Base");
 		if (file != null) return file;
+		// If Base.png is not present, accept the first PNG in Base for faster iteration.
+		File[] files = getFolder(FOLDER_BASE).listFiles();
+		if (files != null) {
+			for (File candidate : files) {
+				if (candidate.isFile() && candidate.getName().toLowerCase().endsWith(".png")) {
+					return candidate;
+				}
+			}
+		}
 		return null;
 	}
 
@@ -218,23 +238,6 @@ public final class HeroSpriteHotSwap {
 		return lastActiveSignature;
 	}
 
-	private static Bitmap fitToCanvas(Bitmap source) {
-		if (source == null) return null;
-		if (source.getWidth() == TARGET_SIZE && source.getHeight() == TARGET_SIZE) return source;
-		float scale = Math.min((float) TARGET_SIZE / source.getWidth(),
-				(float) TARGET_SIZE / source.getHeight());
-		int width = Math.max(1, Math.round(source.getWidth() * scale));
-		int height = Math.max(1, Math.round(source.getHeight() * scale));
-		int left = (TARGET_SIZE - width) / 2;
-		int top = (TARGET_SIZE - height) / 2;
-		Bitmap result = Bitmap.createBitmap(TARGET_SIZE, TARGET_SIZE, Bitmap.Config.ARGB_8888);
-		Canvas canvas = new Canvas(result);
-		Paint paint = new Paint();
-		paint.setFilterBitmap(false);
-		canvas.drawBitmap(source, null, new Rect(left, top, left + width, top + height), paint);
-		return result;
-	}
-
 	private static synchronized Bitmap loadFile(File file) {
 		if (file == null || !file.isFile()) return null;
 		String path = file.getAbsolutePath();
@@ -244,14 +247,17 @@ public final class HeroSpriteHotSwap {
 		if (cached != null && cached.modified == modified && cached.length == length) {
 			return cached.bitmap;
 		}
-		Bitmap decoded = BitmapFactory.decodeFile(path);
-		Bitmap fitted = fitToCanvas(decoded);
+		BitmapFactory.Options options = new BitmapFactory.Options();
+		options.inScaled = false;
+		Bitmap decoded = BitmapFactory.decodeFile(path, options);
+		Bitmap exact = decoded != null && decoded.getWidth() == TARGET_SIZE && decoded.getHeight() == TARGET_SIZE
+				? decoded : null;
 		CachedBitmap next = new CachedBitmap();
 		next.modified = modified;
 		next.length = length;
-		next.bitmap = fitted;
+		next.bitmap = exact;
 		bitmapCache.put(path, next);
-		return fitted;
+		return exact;
 	}
 
 	public static Bitmap loadBaseSprite() {
