@@ -1,4 +1,4 @@
-name: Build Kittens Wear 1.1.0
+name: Build Kittens Wear 1.1.1
 
 on:
   push:
@@ -58,25 +58,29 @@ jobs:
           git -C /tmp/kittensgame checkout 781e379f79f1e7512d168849cba21ed111502644
           rsync -a --exclude=.git /tmp/kittensgame/ wear-kittens/app/src/main/assets/game/
           tar -xzf /tmp/kittens-overlay.tar.gz -C wear-kittens
-          cp .kittens-build/KittensComplicationService.java wear-kittens/app/src/main/java/com/balthazar/kittenswear/KittensComplicationService.java
 
-          keytool -genkeypair -v             -keystore wear-kittens/personal.jks             -storepass kittenswear-1.1.0             -keypass kittenswear-1.1.0             -alias kittens             -keyalg RSA -keysize 2048 -validity 36500             -dname "CN=Kittens Wear Personal Build, O=Personal, C=ES"
+          cp .kittens-build/KittensComplicationService.java wear-kittens/app/src/main/java/com/balthazar/kittenswear/KittensComplicationService.java
+          cp .kittens-build/ComplicationStore.java wear-kittens/app/src/main/java/com/balthazar/kittenswear/ComplicationStore.java
+          cp .kittens-build/AndroidManifest.xml wear-kittens/app/src/main/AndroidManifest.xml
+          cp .kittens-build/app-build.gradle wear-kittens/app/build.gradle
+
+          keytool -genkeypair -v             -keystore wear-kittens/personal.jks             -storepass kittenswear-1.1.1             -keypass kittenswear-1.1.1             -alias kittens             -keyalg RSA -keysize 2048 -validity 36500             -dname "CN=Kittens Wear Personal Build, O=Personal, C=ES"
 
       - name: Build signed release APK
         shell: bash
         working-directory: wear-kittens
         env:
-          KITTENS_KEYSTORE_PASSWORD: kittenswear-1.1.0
+          KITTENS_KEYSTORE_PASSWORD: kittenswear-1.1.1
         run: |
           set -euo pipefail
           gradle :app:assembleRelease --no-daemon --stacktrace
           test -f app/build/outputs/apk/release/app-release.apk
-          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/Kittens-WearOS5-1.1.0.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/Kittens-WearOS5-1.1.1.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Kittens-WearOS5-1.1.0
-          path: Kittens-WearOS5-1.1.0.apk
+          name: Kittens-WearOS5-1.1.1
+          path: Kittens-WearOS5-1.1.1.apk
           if-no-files-found: error
           retention-days: 7
