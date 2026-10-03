@@ -258,6 +258,7 @@ public final class TileManager {
 				sb.append('|').append(slot.ordinal()).append(':').append(type.id);
 			}
 		}
+		sb.append("|hot:").append(HeroSpriteHotSwap.getActiveSignature(player));
 		return sb.toString();
 	}
 
@@ -635,7 +636,67 @@ public final class TileManager {
 		clearPaint.setXfermode(null);
 	}
 
+	private Bitmap buildHotSwapPlayerAppearance(Resources res, Player player) {
+		Bitmap result = Bitmap.createBitmap(HERO_EQUIPMENT_TILE_SIZE, HERO_EQUIPMENT_TILE_SIZE, Bitmap.Config.ARGB_8888);
+		Canvas canvas = new Canvas(result);
+		Paint paint = new Paint();
+		paint.setFilterBitmap(false);
+
+		Bitmap base = HeroSpriteHotSwap.loadBaseSprite();
+		if (!hasVisiblePixels(base)) {
+			base = getHeroEquipmentBase(res);
+		}
+		if (!hasVisiblePixels(base)) {
+			base = getFallbackHeroBitmap(res, player);
+		}
+		if (hasVisiblePixels(base)) {
+			canvas.drawBitmap(base, 0, 0, paint);
+		}
+
+		ItemType body = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.body);
+		ItemType feet = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.feet);
+		ItemType hands = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.hand);
+		ItemType head = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.head);
+		ItemType mainHand = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.weapon);
+		ItemType offHand = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.shield);
+
+		// Hot-swap layering is intentionally simple and deterministic:
+		// lower body first, then torso, gloves, headwear, offhand and mainhand.
+		// Missing files draw nothing for that equipment slot.
+		Bitmap feetSprite = HeroSpriteHotSwap.loadItemSprite(HeroSpriteHotSwap.FOLDER_FOOTWEAR, feet, player);
+		if (hasVisiblePixels(feetSprite)) canvas.drawBitmap(feetSprite, 0, 0, paint);
+
+		Bitmap bodySprite = HeroSpriteHotSwap.loadItemSprite(HeroSpriteHotSwap.FOLDER_ARMOR, body, player);
+		if (hasVisiblePixels(bodySprite)) canvas.drawBitmap(bodySprite, 0, 0, paint);
+
+		Bitmap handSprite = HeroSpriteHotSwap.loadItemSprite(HeroSpriteHotSwap.FOLDER_GLOVES, hands, player);
+		if (hasVisiblePixels(handSprite)) canvas.drawBitmap(handSprite, 0, 0, paint);
+
+		Bitmap headSprite = HeroSpriteHotSwap.loadItemSprite(HeroSpriteHotSwap.FOLDER_HEADWEAR, head, player);
+		if (hasVisiblePixels(headSprite)) canvas.drawBitmap(headSprite, 0, 0, paint);
+
+		Bitmap offhandSprite = HeroSpriteHotSwap.loadItemSprite(HeroSpriteHotSwap.FOLDER_OFFHAND, offHand, player);
+		if (hasVisiblePixels(offhandSprite)) canvas.drawBitmap(offhandSprite, 0, 0, paint);
+
+		Bitmap mainhandSprite = HeroSpriteHotSwap.loadItemSprite(HeroSpriteHotSwap.FOLDER_MAINHAND, mainHand, player);
+		if (hasVisiblePixels(mainhandSprite)) {
+			if (isAppearanceTwoHanded(mainHand)) {
+				clearTwoHandSideHands(canvas, res);
+			}
+			canvas.drawBitmap(mainhandSprite, 0, 0, paint);
+		}
+
+		if (!hasVisiblePixels(result)) {
+			Bitmap fallback = getFallbackHeroBitmap(res, player);
+			if (fallback != null) canvas.drawBitmap(fallback, 0, 0, paint);
+		}
+		return result;
+	}
+
 	private Bitmap buildPlayerAppearance(Resources res, Player player) {
+		if (HeroSpriteHotSwap.isStorageAccessible()) {
+			return buildHotSwapPlayerAppearance(res, player);
+		}
 		Bitmap result = Bitmap.createBitmap(HERO_EQUIPMENT_TILE_SIZE, HERO_EQUIPMENT_TILE_SIZE, Bitmap.Config.ARGB_8888);
 		Canvas canvas = new Canvas(result);
 		Paint paint = new Paint();
