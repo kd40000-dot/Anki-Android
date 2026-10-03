@@ -1,4 +1,4 @@
-name: Build Kittens Wear 1.1.3
+name: Build Kittens Wear 1.1.4
 
 on:
   push:
@@ -62,6 +62,7 @@ jobs:
           cp .kittens-build/KittensComplicationService.java wear-kittens/app/src/main/java/com/balthazar/kittenswear/KittensComplicationService.java
           cp .kittens-build/ComplicationStore.java wear-kittens/app/src/main/java/com/balthazar/kittenswear/ComplicationStore.java
           cp .kittens-build/LocalGameServer.java wear-kittens/app/src/main/java/com/balthazar/kittenswear/LocalGameServer.java
+          cp .kittens-build/MainActivity.java wear-kittens/app/src/main/java/com/balthazar/kittenswear/MainActivity.java
           cp .kittens-build/AndroidManifest.xml wear-kittens/app/src/main/AndroidManifest.xml
           cp .kittens-build/app-build.gradle wear-kittens/app/build.gradle
 
@@ -70,32 +71,42 @@ jobs:
           import re
           p=Path("wear-kittens/app/src/main/assets/game/wear.js")
           s=p.read_text()
-          export_new="""button('Export save',async()=>{try{const response=await fetch('/export',{method:'POST',body:JSON.stringify({exportText:game.compressLZData(JSON.stringify(game.save()))})});if(!response.ok)throw Error();const result=await response.json();detail('<h2>Save exported</h2><p><b>kittens-save.txt</b></p><p>Saved in <b>Download/Kittens Game/</b>. No storage permission is required.</p>');}catch(e){status('Export failed. Try Save now.');}},settings);"""
-          import_new="""button('Import save file',async()=>{try{const r=await fetch('/import');if(!r.ok){detail('<h2>Import a save</h2><p>Place <b>kittens-import.txt</b> in <b>Download/Kittens Game/</b>, then tap Import again. It can contain a web export or save JSON.</p>');return;}let text=await r.text();if(!confirm('Replace your current village with this save?'))return;await importSave(text);}catch(e){console.error('Import error',e);detail('<h2>Import failed</h2><p>The current village has been kept. Check the save file.</p>');}},settings);"""
-          s,n1=re.subn(r"button\('Export save'.*?\},settings\);",lambda m:export_new,s,count=1)
-          s,n2=re.subn(r"button\('Import save file'.*?\},settings\);",lambda m:import_new,s,count=1)
-          if n1!=1 or n2!=1: raise SystemExit(f"wear.js patch failed export={n1} import={n2}")
-          s=re.sub(r"Kittens Wear 1\.1\.\d+","Kittens Wear 1.1.3",s)
+          helper=r"""function wearEsc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+ async function waitNative(url){for(;;){await new Promise(r=>setTimeout(r,500));const q=await fetch(url,{cache:'no-store'});let x;try{x=await q.json();}catch(e){throw new Error('Native operation returned invalid JSON: '+e.message);}if(x.state!=='waiting')return x;}}
+ function opError(title,x){detail('<h2>'+wearEsc(title)+'</h2><p><b>Operation:</b> '+wearEsc(x.operation||'unknown')+'</p><p><b>Error type:</b> '+wearEsc(x.type||'unknown')+'</p><p><b>Message:</b> '+wearEsc(x.message||'No message')+'</p>'+(x.cause?'<p><b>Cause:</b> '+wearEsc(x.cause)+'</p>':'')+(x.detail?'<p><b>Details:</b> '+wearEsc(x.detail)+'</p>':''));}"""
+          s=s.replace(" settings.append(node('div',{className:'wear-label'},'Your game'));"," settings.append(node('div',{className:'wear-label'},'Your game'));\n "+helper)
+          savebtn="""button('Save now',async()=>{await save(true);},settings);"""
+          exportbtn="""button('Export save',async()=>{try{const response=await fetch('/export',{method:'POST',body:JSON.stringify({exportText:game.compressLZData(JSON.stringify(game.save()))})});const first=await response.json();if(!response.ok){opError('Export could not start',first);return;}status('Choose where to save the file');const x=await waitNative('/export-status');if(x.state==='success')detail('<h2>Export complete</h2><p>The save was written successfully.</p><p><b>Bytes:</b> '+wearEsc(x.bytes)+'</p><p><b>Destination:</b> '+wearEsc(x.uri)+'</p>');else if(x.state==='cancelled')status('Export cancelled');else opError('Export failed',x);}catch(e){opError('Export failed',{operation:'export',type:e.name,message:e.message,detail:'JavaScript could not complete the export workflow.'});}},settings);"""
+          importbtn="""button('Import save file',async()=>{try{const response=await fetch('/import',{method:'POST'});const first=await response.json();if(!response.ok){opError('Import could not start',first);return;}status('Choose a Kittens Game save file');const x=await waitNative('/import-status');if(x.state==='cancelled'){status('Import cancelled');return;}if(x.state!=='success'){opError('Import failed',x);return;}if(!confirm('Replace your current village with the selected save?'))return;await importSave(x.text);detail('<h2>Import complete</h2><p>The selected save was validated and loaded successfully.</p><p><b>Bytes:</b> '+wearEsc(x.bytes)+'</p><p><b>Source:</b> '+wearEsc(x.uri)+'</p>');}catch(e){opError('Import failed',{operation:'import',type:e.name,message:e.message,detail:'The selected file was not accepted or could not be loaded. Your previous village was kept whenever import validation failed.'});}},settings);"""
+          s,n0=re.subn(r"button\('Save now'.*?settings\);",lambda m:savebtn,s,count=1)
+          s,n1=re.subn(r"button\('Export save'.*?settings\);",lambda m:exportbtn,s,count=1)
+          s,n2=re.subn(r"button\('Import save file'.*?settings\);",lambda m:importbtn,s,count=1)
+          if (n0,n1,n2)!=(1,1,1): raise SystemExit(f"button patch failed save={n0} export={n1} import={n2}")
+          old=r"""async function save(manual){if(!ready || game.currentSaveIsBroken)return;try{let data=game.save();const r=await fetch('/backup',{method:'POST',body:JSON.stringify(data),keepalive:true});if(!r.ok)throw Error();if(manual)status('Saved on this watch');}catch(e){status('Local save made; backup could not be written');}}"""
+          new=r"""async function save(manual){if(!ready || game.currentSaveIsBroken){if(manual)opError('Save failed',{operation:'save',type:'GameStateError',message:'The game is not ready to save or reports the current save as broken.',detail:'No new save file was created.'});return;}try{let data=game.save();const endpoint=manual?'/save-manual':'/backup';const r=await fetch(endpoint,{method:'POST',body:JSON.stringify(data),keepalive:true});let x;try{x=await r.json();}catch(e){throw new Error('Save service returned invalid JSON: '+e.message);}if(!r.ok||x.state==='error'){if(manual)opError('Save failed',x);return;}if(manual){let msg='<h2>Save complete</h2><p><b>'+wearEsc(x.fileName||'KittensGame save')+'</b></p><p>Location: <b>'+wearEsc(x.location||'internal storage')+'</b></p><p>Internal recovery copy: <b>'+(x.internal?'OK':'FAILED')+'</b><br>Visible timestamped copy: <b>'+(x.visible?'OK':'FAILED')+'</b></p>';if(x.detail)msg+='<p><b>Warnings:</b> '+wearEsc(x.detail)+'</p>';detail(msg);}}catch(e){if(manual)opError('Save failed',{operation:'save',type:e.name,message:e.message,detail:'The request to the native save service failed.'});}}"""
+          if old not in s: raise SystemExit("save function patch target not found")
+          s=s.replace(old,new,1)
+          s=re.sub(r"Kittens Wear 1\.1\.\d+","Kittens Wear 1.1.4",s)
           p.write_text(s)
           PY
 
-          keytool -genkeypair -v             -keystore wear-kittens/personal.jks             -storepass kittenswear-1.1.3             -keypass kittenswear-1.1.3             -alias kittens             -keyalg RSA -keysize 2048 -validity 36500             -dname "CN=Kittens Wear Personal Build, O=Personal, C=ES"
+          keytool -genkeypair -v             -keystore wear-kittens/personal.jks             -storepass kittenswear-1.1.4             -keypass kittenswear-1.1.4             -alias kittens             -keyalg RSA -keysize 2048 -validity 36500             -dname "CN=Kittens Wear Personal Build, O=Personal, C=ES"
 
       - name: Build signed release APK
         shell: bash
         working-directory: wear-kittens
         env:
-          KITTENS_KEYSTORE_PASSWORD: kittenswear-1.1.3
+          KITTENS_KEYSTORE_PASSWORD: kittenswear-1.1.4
         run: |
           set -euo pipefail
           gradle :app:assembleRelease --no-daemon --stacktrace
           test -f app/build/outputs/apk/release/app-release.apk
-          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/Kittens-WearOS5-1.1.3.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/Kittens-WearOS5-1.1.4.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Kittens-WearOS5-1.1.3
-          path: Kittens-WearOS5-1.1.3.apk
+          name: Kittens-WearOS5-1.1.4
+          path: Kittens-WearOS5-1.1.4.apk
           if-no-files-found: error
           retention-days: 7
