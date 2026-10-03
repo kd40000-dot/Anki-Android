@@ -90,8 +90,8 @@ final class LocalGameServer {
   boolean internal=false,visible=false;String name="";StringBuilder errors=new StringBuilder();
   try{AtomicFile f=new AtomicFile(backup());FileOutputStream out=null;try{out=f.startWrite();out.write(body);f.finishWrite(out);internal=true;}catch(IOException e){if(out!=null)f.failWrite(out);throw e;}}catch(Exception e){errors.append("Internal backup failed: ").append(e.getClass().getSimpleName()).append(": ").append(e.getMessage()).append(". ");}
   try{name="KittensGame_"+timestamp()+".txt";writeDownload(name,body,AUTOSAVE_PATH);visible=true;}catch(Exception e){errors.append("Visible autosave failed: ").append(e.getClass().getSimpleName()).append(": ").append(e.getMessage()).append(". ");}
-  String state=(internal||visible)?"success":"error";
-  return "{\"state\":\""+state+"\",\"internal\":"+internal+",\"visible\":"+visible+",\"fileName\":\""+esc(name)+"\",\"location\":\"Download/Kittens Game/Autosaves/\",\"detail\":\""+esc(errors.toString())+"\"}";
+  if(!internal&&!visible)return "{\"state\":\"error\",\"operation\":\"save\",\"type\":\"StorageWriteError\",\"message\":\"Both the internal recovery copy and visible timestamped copy failed.\",\"internal\":false,\"visible\":false,\"detail\":\""+esc(errors.toString())+"\"}";
+  return "{\"state\":\"success\",\"internal\":"+internal+",\"visible\":"+visible+",\"fileName\":\""+esc(name)+"\",\"location\":\"Download/Kittens Game/Autosaves/\",\"detail\":\""+esc(errors.toString())+"\"}";
  }
  private static String timestamp(){return new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss",Locale.US).format(new Date());}
  private void writeDownload(String name,byte[] bytes,String relativePath)throws IOException{
