@@ -58,6 +58,7 @@ jobs:
           git -C /tmp/kittensgame checkout 781e379f79f1e7512d168849cba21ed111502644
           rsync -a --exclude=.git /tmp/kittensgame/ wear-kittens/app/src/main/assets/game/
           tar -xzf /tmp/kittens-overlay.tar.gz -C wear-kittens
+          cp .kittens-build/KittensComplicationService.java wear-kittens/app/src/main/java/com/balthazar/kittenswear/KittensComplicationService.java
 
           keytool -genkeypair -v             -keystore wear-kittens/personal.jks             -storepass kittenswear-1.1.0             -keypass kittenswear-1.1.0             -alias kittens             -keyalg RSA -keysize 2048 -validity 36500             -dname "CN=Kittens Wear Personal Build, O=Personal, C=ES"
 
