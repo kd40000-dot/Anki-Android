@@ -1,4 +1,4 @@
-name: Build Kittens Wear 1.1.2
+name: Build Kittens Wear 1.1.3
 
 on:
   push:
@@ -70,32 +70,32 @@ jobs:
           import re
           p=Path("wear-kittens/app/src/main/assets/game/wear.js")
           s=p.read_text()
-          export_new="""button('Export save',async()=>{try{const response=await fetch('/export',{method:'POST',body:JSON.stringify({exportText:game.compressLZData(JSON.stringify(game.save()))})});if(response.status===403){detail('<h2>Storage access needed</h2><p>Android opened the file-access setting. Enable <b>Allow access to manage all files</b>, return to Kittens Wear, then tap <b>Export save</b> again.</p>');return;}if(!response.ok)throw Error();const result=await response.json();detail('<h2>Save exported</h2><p><b>kittens-save.txt</b></p><p>Saved in <b>/storage/emulated/0/Kittens Game/</b>.</p>');}catch(e){status('Export failed. Try Save now.');}},settings);"""
-          import_new="""button('Import save file',async()=>{try{const r=await fetch('/import');if(r.status===403){detail('<h2>Storage access needed</h2><p>Android opened the file-access setting. Enable <b>Allow access to manage all files</b>, return to Kittens Wear, then tap <b>Import save file</b> again.</p>');return;}if(!r.ok){detail('<h2>Import a save</h2><p>Place <b>kittens-import.txt</b> in <b>/storage/emulated/0/Kittens Game/</b>, then tap Import again. It can contain a web export or save JSON.</p>');return;}let text=await r.text();if(!confirm('Replace your current village with this save?'))return;await importSave(text);}catch(e){console.error('Import error',e);detail('<h2>Import failed</h2><p>The current village has been kept. Check the save file.</p>');}},settings);"""
+          export_new="""button('Export save',async()=>{try{const response=await fetch('/export',{method:'POST',body:JSON.stringify({exportText:game.compressLZData(JSON.stringify(game.save()))})});if(!response.ok)throw Error();const result=await response.json();detail('<h2>Save exported</h2><p><b>kittens-save.txt</b></p><p>Saved in <b>Download/Kittens Game/</b>. No storage permission is required.</p>');}catch(e){status('Export failed. Try Save now.');}},settings);"""
+          import_new="""button('Import save file',async()=>{try{const r=await fetch('/import');if(!r.ok){detail('<h2>Import a save</h2><p>Place <b>kittens-import.txt</b> in <b>Download/Kittens Game/</b>, then tap Import again. It can contain a web export or save JSON.</p>');return;}let text=await r.text();if(!confirm('Replace your current village with this save?'))return;await importSave(text);}catch(e){console.error('Import error',e);detail('<h2>Import failed</h2><p>The current village has been kept. Check the save file.</p>');}},settings);"""
           s,n1=re.subn(r"button\('Export save'.*?\},settings\);",lambda m:export_new,s,count=1)
           s,n2=re.subn(r"button\('Import save file'.*?\},settings\);",lambda m:import_new,s,count=1)
           if n1!=1 or n2!=1: raise SystemExit(f"wear.js patch failed export={n1} import={n2}")
-          s=re.sub(r"Kittens Wear 1\.1\.\d+","Kittens Wear 1.1.2",s)
+          s=re.sub(r"Kittens Wear 1\.1\.\d+","Kittens Wear 1.1.3",s)
           p.write_text(s)
           PY
 
-          keytool -genkeypair -v             -keystore wear-kittens/personal.jks             -storepass kittenswear-1.1.2             -keypass kittenswear-1.1.2             -alias kittens             -keyalg RSA -keysize 2048 -validity 36500             -dname "CN=Kittens Wear Personal Build, O=Personal, C=ES"
+          keytool -genkeypair -v             -keystore wear-kittens/personal.jks             -storepass kittenswear-1.1.3             -keypass kittenswear-1.1.3             -alias kittens             -keyalg RSA -keysize 2048 -validity 36500             -dname "CN=Kittens Wear Personal Build, O=Personal, C=ES"
 
       - name: Build signed release APK
         shell: bash
         working-directory: wear-kittens
         env:
-          KITTENS_KEYSTORE_PASSWORD: kittenswear-1.1.2
+          KITTENS_KEYSTORE_PASSWORD: kittenswear-1.1.3
         run: |
           set -euo pipefail
           gradle :app:assembleRelease --no-daemon --stacktrace
           test -f app/build/outputs/apk/release/app-release.apk
-          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/Kittens-WearOS5-1.1.2.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/Kittens-WearOS5-1.1.3.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Kittens-WearOS5-1.1.2
-          path: Kittens-WearOS5-1.1.2.apk
+          name: Kittens-WearOS5-1.1.3
+          path: Kittens-WearOS5-1.1.3.apk
           if-no-files-found: error
           retention-days: 7
