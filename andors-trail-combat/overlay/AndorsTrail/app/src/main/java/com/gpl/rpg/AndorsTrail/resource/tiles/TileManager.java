@@ -180,6 +180,13 @@ public final class TileManager {
 				+ "_hand_" + directHeroToken(hands));
 	}
 
+	private Bitmap getDirectBodyHandFeetCombo(Resources res, ItemType body, ItemType hands, ItemType feet) {
+		if (body == null || hands == null || feet == null) return null;
+		return getDirectHeroSprite(res, "hero_direct_combo_body_" + directHeroToken(body)
+				+ "_hand_" + directHeroToken(hands)
+				+ "_feet_" + directHeroToken(feet));
+	}
+
 	private void drawBitmapPossiblyMirrored(Canvas canvas, Bitmap bitmap, Paint paint, boolean mirror) {
 		if (bitmap == null) return;
 		if (mirror) {
@@ -638,10 +645,17 @@ public final class TileManager {
 
 		boolean directBodyHandled = false;
 		boolean directHandsHandled = false;
+		boolean directFeetHandled = false;
 		if (player.iconID <= LAST_HERO) {
-			Bitmap combo = getDirectBodyHandCombo(res, body, hands);
+			Bitmap fullCombo = getDirectBodyHandFeetCombo(res, body, hands, feet);
+			Bitmap bodyHandCombo = hasVisiblePixels(fullCombo) ? null : getDirectBodyHandCombo(res, body, hands);
+			Bitmap combo = hasVisiblePixels(fullCombo) ? fullCombo : bodyHandCombo;
 			Bitmap base = hasVisiblePixels(combo) ? combo : getHeroEquipmentBase(res);
-			if (hasVisiblePixels(combo)) {
+			if (hasVisiblePixels(fullCombo)) {
+				directBodyHandled = true;
+				directHandsHandled = true;
+				directFeetHandled = true;
+			} else if (hasVisiblePixels(bodyHandCombo)) {
 				directBodyHandled = true;
 				directHandsHandled = true;
 			}
@@ -679,8 +693,11 @@ public final class TileManager {
 				drawHeroEquipmentLayer(canvas, res, paint, getBodyLayer(body, player), body, false, true);
 			}
 		}
-		if (!drawDirectEquipmentLayer(canvas, res, paint, "feet", feet, false, true)) {
-			drawHeroEquipmentLayer(canvas, res, paint, getFeetLayer(feet), feet, false, true);
+		if (!directFeetHandled) {
+			directFeetHandled = drawDirectEquipmentLayer(canvas, res, paint, "feet", feet, false, true);
+			if (!directFeetHandled) {
+				drawHeroEquipmentLayer(canvas, res, paint, getFeetLayer(feet), feet, false, true);
+			}
 		}
 		if (!directHandsHandled) {
 			directHandsHandled = drawDirectEquipmentLayer(canvas, res, paint, "hand", hands, false, true);
