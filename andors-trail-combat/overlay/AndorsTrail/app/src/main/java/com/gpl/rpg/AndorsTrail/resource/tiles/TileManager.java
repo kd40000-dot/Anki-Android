@@ -187,6 +187,11 @@ public final class TileManager {
 				+ "_feet_" + directHeroToken(feet));
 	}
 
+	private Bitmap getDirectFeetOnlyCombo(Resources res, ItemType body, ItemType hands, ItemType feet) {
+		if (body != null || hands != null || feet == null) return null;
+		return getDirectHeroSprite(res, "hero_direct_combo_feet_" + directHeroToken(feet));
+	}
+
 	private void drawBitmapPossiblyMirrored(Canvas canvas, Bitmap bitmap, Paint paint, boolean mirror) {
 		if (bitmap == null) return;
 		if (mirror) {
@@ -648,12 +653,17 @@ public final class TileManager {
 		boolean directFeetHandled = false;
 		if (player.iconID <= LAST_HERO) {
 			Bitmap fullCombo = getDirectBodyHandFeetCombo(res, body, hands, feet);
-			Bitmap bodyHandCombo = hasVisiblePixels(fullCombo) ? null : getDirectBodyHandCombo(res, body, hands);
-			Bitmap combo = hasVisiblePixels(fullCombo) ? fullCombo : bodyHandCombo;
+			Bitmap feetOnlyCombo = hasVisiblePixels(fullCombo) ? null : getDirectFeetOnlyCombo(res, body, hands, feet);
+			Bitmap bodyHandCombo = (hasVisiblePixels(fullCombo) || hasVisiblePixels(feetOnlyCombo))
+					? null : getDirectBodyHandCombo(res, body, hands);
+			Bitmap combo = hasVisiblePixels(fullCombo) ? fullCombo
+					: (hasVisiblePixels(feetOnlyCombo) ? feetOnlyCombo : bodyHandCombo);
 			Bitmap base = hasVisiblePixels(combo) ? combo : getHeroEquipmentBase(res);
 			if (hasVisiblePixels(fullCombo)) {
 				directBodyHandled = true;
 				directHandsHandled = true;
+				directFeetHandled = true;
+			} else if (hasVisiblePixels(feetOnlyCombo)) {
 				directFeetHandled = true;
 			} else if (hasVisiblePixels(bodyHandCombo)) {
 				directBodyHandled = true;
@@ -687,16 +697,18 @@ public final class TileManager {
 		// derived from the real item ID, so adding or replacing approved artwork usually
 		// requires only PNG changes, not another TileManager edit. Missing direct art
 		// transparently falls back to the existing category/item renderer.
-		if (!directBodyHandled) {
-			directBodyHandled = drawDirectEquipmentLayer(canvas, res, paint, "body", body, false, true);
-			if (!directBodyHandled) {
-				drawHeroEquipmentLayer(canvas, res, paint, getBodyLayer(body, player), body, false, true);
-			}
-		}
+		// Lower-body items render first. Shirts/tunics then sit over their waistband/hip area,
+		// matching how the supplied character art is layered.
 		if (!directFeetHandled) {
 			directFeetHandled = drawDirectEquipmentLayer(canvas, res, paint, "feet", feet, false, true);
 			if (!directFeetHandled) {
 				drawHeroEquipmentLayer(canvas, res, paint, getFeetLayer(feet), feet, false, true);
+			}
+		}
+		if (!directBodyHandled) {
+			directBodyHandled = drawDirectEquipmentLayer(canvas, res, paint, "body", body, false, true);
+			if (!directBodyHandled) {
+				drawHeroEquipmentLayer(canvas, res, paint, getBodyLayer(body, player), body, false, true);
 			}
 		}
 		if (!directHandsHandled) {
