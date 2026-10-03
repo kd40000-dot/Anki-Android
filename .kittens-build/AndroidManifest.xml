@@ -1,7 +1,6 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
  <uses-permission android:name="android.permission.INTERNET"/>
  <uses-permission android:name="android.permission.VIBRATE"/>
- <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
  <uses-feature android:name="android.hardware.type.watch" android:required="true"/>
  <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
  <application android:label="Kittens Wear" android:icon="@drawable/ic_cat" android:theme="@style/AppTheme" android:allowBackup="false" android:usesCleartextTraffic="true" android:supportsRtl="true">
@@ -12,16 +11,8 @@
    <meta-data android:name="android.support.wearable.complications.UPDATE_PERIOD_SECONDS" android:value="300"/>
    <meta-data android:name="android.support.wearable.complications.PROVIDER_CONFIG_ACTION" android:value="com.balthazar.kittenswear.CONFIGURE_RESOURCE"/>
   </service>
-  <activity android:name=".ComplicationConfigActivity" android:exported="true" android:theme="@style/AppTheme">
-   <intent-filter>
-    <action android:name="com.balthazar.kittenswear.CONFIGURE_RESOURCE"/>
-    <category android:name="android.support.wearable.complications.category.PROVIDER_CONFIG"/>
-    <category android:name="android.intent.category.DEFAULT"/>
-   </intent-filter>
-  </activity>
+  <activity android:name=".ComplicationConfigActivity" android:exported="true" android:theme="@style/AppTheme"><intent-filter><action android:name="com.balthazar.kittenswear.CONFIGURE_RESOURCE"/><category android:name="android.support.wearable.complications.category.PROVIDER_CONFIG"/><category android:name="android.intent.category.DEFAULT"/></intent-filter></activity>
   <receiver android:name=".ResourceFullReceiver" android:exported="false"/>
-  <activity android:name=".MainActivity" android:exported="true" android:taskAffinity="" android:configChanges="orientation|screenSize|keyboardHidden|uiMode" android:windowSoftInputMode="adjustResize">
-   <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
-  </activity>
+  <activity android:name=".MainActivity" android:exported="true" android:taskAffinity="" android:configChanges="orientation|screenSize|keyboardHidden|uiMode" android:windowSoftInputMode="adjustResize"><intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter></activity>
  </application>
 </manifest>
