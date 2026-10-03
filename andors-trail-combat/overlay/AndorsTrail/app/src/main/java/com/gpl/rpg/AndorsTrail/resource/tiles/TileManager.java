@@ -116,6 +116,7 @@ public final class TileManager {
 	private Bitmap heroEquipmentLayers;
 	private Bitmap heroEquipmentMasks;
 	private Bitmap heroEquipmentBase;
+	private Bitmap heroKidsShirtModel;
 	private Bitmap heroTwoHandClearMask;
 	private Bitmap playerAppearanceBitmap;
 	private String playerAppearanceSignature;
@@ -141,6 +142,13 @@ public final class TileManager {
 			heroEquipmentBase = BitmapFactory.decodeResource(res, R.drawable.hero_equipment_base);
 		}
 		return heroEquipmentBase;
+	}
+
+	private Bitmap getHeroKidsShirtModel(Resources res) {
+		if (heroKidsShirtModel == null) {
+			heroKidsShirtModel = BitmapFactory.decodeResource(res, R.drawable.hero_kids_shirt_model);
+		}
+		return heroKidsShirtModel;
 	}
 
 	private Bitmap getHeroTwoHandClearMask(Resources res) {
@@ -559,8 +567,12 @@ public final class TileManager {
 		Paint paint = new Paint();
 		paint.setFilterBitmap(false);
 
+		ItemType body = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.body);
+		final boolean useExactKidsShirtModel = player.iconID <= LAST_HERO
+				&& body != null && "kids_shirt".equals(body.id);
+
 		if (player.iconID <= LAST_HERO) {
-			Bitmap base = getHeroEquipmentBase(res);
+			Bitmap base = useExactKidsShirtModel ? getHeroKidsShirtModel(res) : getHeroEquipmentBase(res);
 			if (hasVisiblePixels(base)) {
 				canvas.drawBitmap(base, null,
 						new Rect(0, 0, HERO_EQUIPMENT_TILE_SIZE, HERO_EQUIPMENT_TILE_SIZE), paint);
@@ -585,7 +597,6 @@ public final class TileManager {
 			}
 		}
 
-		ItemType body = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.body);
 		ItemType feet = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.feet);
 		ItemType hands = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.hand);
 		ItemType head = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.head);
@@ -595,7 +606,9 @@ public final class TileManager {
 		// Armor pieces replace only the body pixels they physically cover.
 		// A shirt cannot erase the head or hands, gloves stay on the hands,
 		// boots stay on the lower legs/feet, and body armor stops around the hips.
-		drawHeroEquipmentLayer(canvas, res, paint, getBodyLayer(body, player), body, false, true);
+		if (!useExactKidsShirtModel) {
+			drawHeroEquipmentLayer(canvas, res, paint, getBodyLayer(body, player), body, false, true);
+		}
 		drawHeroEquipmentLayer(canvas, res, paint, getFeetLayer(feet), feet, false, true);
 		drawHeroEquipmentLayer(canvas, res, paint, getHandLayer(hands), hands, false, true);
 		drawHeroEquipmentLayer(canvas, res, paint, getHeadLayer(head, player), head, false, true);
