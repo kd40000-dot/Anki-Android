@@ -5,10 +5,14 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.ContentValues;
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.util.AtomicFile;
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.common.BitMatrix;
+import com.google.zxing.qrcode.QRCodeWriter;
 import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
@@ -75,6 +79,8 @@ final class LocalGameServer {
     data=startTransfer(parsed.getString("exportText")).getBytes(StandardCharsets.UTF_8);
    }else if(path.equals("/transfer/status")){
     data=transferStatus().getBytes(StandardCharsets.UTF_8);
+   }else if(path.equals("/transfer/qr")){
+    byte[] png=transferQr();reply(s,200,"image/png",png);return;
    }else if(path.equals("/transfer/import-text")){
     data=getPendingImport().getBytes(StandardCharsets.UTF_8);
    }else if(request[0].equals("POST")&&path.equals("/transfer/clear-import")){
@@ -157,6 +163,17 @@ final class LocalGameServer {
   String p=pendingImport;
   long remaining=Math.max(0,(transferExpires-System.currentTimeMillis()+999)/1000);
   return "{\"state\":\"success\",\"active\":true,\"url\":\""+esc(transferUrl)+"\",\"remainingSeconds\":"+remaining+",\"pending\":"+(p!=null)+",\"pendingCharacters\":"+(p==null?0:p.length())+",\"pendingId\":"+pendingImportId+"}";
+ }
+ private byte[] transferQr()throws Exception{
+  String url=transferUrl;
+  if(url==null||transferSocket==null||transferSocket.isClosed())throw new IllegalStateException("Transfer server is not active.");
+  BitMatrix matrix=new QRCodeWriter().encode(url,BarcodeFormat.QR_CODE,360,360);
+  int w=matrix.getWidth(),h=matrix.getHeight();int[] pixels=new int[w*h];
+  for(int y=0;y<h;y++)for(int x=0;x<w;x++)pixels[y*w+x]=matrix.get(x,y)?0xff000000:0xffffffff;
+  Bitmap bitmap=Bitmap.createBitmap(pixels,w,h,Bitmap.Config.ARGB_8888);
+  ByteArrayOutputStream out=new ByteArrayOutputStream();
+  if(!bitmap.compress(Bitmap.CompressFormat.PNG,100,out))throw new IOException("Could not encode transfer QR.");
+  bitmap.recycle();return out.toByteArray();
  }
  private String getPendingImport(){
   String p=pendingImport;
