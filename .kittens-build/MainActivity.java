@@ -23,7 +23,7 @@ public class MainActivity extends Activity {
    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN|View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION|View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
   try{
    if(server==null)server=new LocalGameServer(this);
-   if(runtime==null)runtime=GeckoRuntime.create(getApplicationContext(),new GeckoRuntimeSettings.Builder().javaScriptEnabled(true).consoleOutput(BuildConfig.DEBUG).build());
+   if(runtime==null)runtime=GeckoRuntime.create(getApplicationContext(),new GeckoRuntimeSettings.Builder().javaScriptEnabled(true).consoleOutput(false).build());
    view=new GeckoView(this);view.setBackgroundColor(0xff000000);setContentView(view);
    if(session==null){
     session=new GeckoSession(new GeckoSessionSettings.Builder().usePrivateMode(false).build());
