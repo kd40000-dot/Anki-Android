@@ -17,6 +17,7 @@ import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.Executors;
@@ -67,6 +68,12 @@ final class LocalGameServer {
  private static String errorJson(String op,Throwable e,String detail){
   String cause=e.getCause()!=null?e.getCause().getClass().getName()+": "+String.valueOf(e.getCause().getMessage()):"";
   return "{\"state\":\"error\",\"operation\":\""+esc(op)+"\",\"type\":\""+esc(e.getClass().getName())+"\",\"message\":\""+esc(String.valueOf(e.getMessage()))+"\",\"cause\":\""+esc(cause)+"\",\"detail\":\""+esc(detail)+"\"}";
+ }
+ private static String sha256Hex(byte[] bytes)throws Exception{
+  byte[] digest=MessageDigest.getInstance("SHA-256").digest(bytes);
+  StringBuilder out=new StringBuilder(digest.length*2);
+  for(byte b:digest)out.append(String.format(Locale.US,"%02x",b&0xff));
+  return out.toString();
  }
 
  private void serveLocal(Socket socket){
@@ -246,30 +253,36 @@ final class LocalGameServer {
    if(!rawPath.startsWith(prefix)){reply(s,403,"text/plain","Invalid transfer token.".getBytes(StandardCharsets.UTF_8));return;}
    String action=rawPath.substring(prefix.length());
 
-   if(request[0].equals("GET")&&(action.isEmpty()||action.equals("index.html"))){
-    reply(s,200,"text/html",transferPage().getBytes(StandardCharsets.UTF_8));
+   if(request[0].equals("OPTIONS")){
+    transferReply(s,200,"text/plain",new byte[0]);return;
+   }else if(request[0].equals("GET")&&(action.isEmpty()||action.equals("index.html"))){
+    transferReply(s,200,"text/html",transferPage().getBytes(StandardCharsets.UTF_8));
    }else if(request[0].equals("GET")&&action.equals("download")){
     String save=transferExport;
     if(save==null)throw new IllegalStateException("No export is available.");
+    byte[] saveBytes=save.getBytes(StandardCharsets.UTF_8);
     String filename="KittensGame_"+timestamp()+".txt";
     Map<String,String> headers=new LinkedHashMap<>();
     headers.put("Content-Disposition","attachment; filename=\""+filename+"\"");
-    reply(s,200,"text/plain",save.getBytes(StandardCharsets.UTF_8),headers);
+    headers.put("X-Kittens-Length",String.valueOf(saveBytes.length));
+    headers.put("X-Kittens-SHA256",sha256Hex(saveBytes));
+    transferReply(s,200,"text/plain",saveBytes,headers);
    }else if(request[0].equals("POST")&&action.equals("import")){
     byte[] body=in.readNBytes(length);
     if(body.length!=length)throw new IOException("Import upload was incomplete.");
-    String text=new String(body,StandardCharsets.UTF_8).trim();
-    if(text.isEmpty())throw new IOException("Uploaded save is empty.");
+    String text=new String(body,StandardCharsets.UTF_8);
+    if(text.trim().isEmpty())throw new IOException("Uploaded save is empty.");
+    String hash=sha256Hex(body);
     synchronized(this){
      pendingImport=text;
      pendingImportId++;
     }
-    reply(s,200,"application/json",("{\"state\":\"success\",\"characters\":"+text.length()+",\"id\":"+pendingImportId+"}").getBytes(StandardCharsets.UTF_8));
+    transferReply(s,200,"application/json",("{\"state\":\"success\",\"characters\":"+text.length()+",\"bytes\":"+body.length+",\"sha256\":\""+hash+"\",\"id\":"+pendingImportId+"}").getBytes(StandardCharsets.UTF_8));
    }else{
-    reply(s,404,"text/plain","Not found".getBytes(StandardCharsets.UTF_8));
+    transferReply(s,404,"text/plain","Not found".getBytes(StandardCharsets.UTF_8));
    }
   }catch(Exception e){
-   try{reply(socket,500,"application/json",errorJson("transfer",e,"LAN transfer request failed").getBytes(StandardCharsets.UTF_8));}catch(Exception ignored){}
+   try{transferReply(socket,500,"application/json",errorJson("transfer",e,"LAN transfer request failed").getBytes(StandardCharsets.UTF_8));}catch(Exception ignored){}
   }
  }
 
@@ -382,6 +395,16 @@ final class LocalGameServer {
   }
  }
 
+ private void transferReply(Socket s,int status,String type,byte[] data)throws IOException{transferReply(s,status,type,data,Collections.emptyMap());}
+ private void transferReply(Socket s,int status,String type,byte[] data,Map<String,String> extra)throws IOException{
+  Map<String,String> headers=new LinkedHashMap<>(extra);
+  headers.put("Access-Control-Allow-Origin","*");
+  headers.put("Access-Control-Allow-Methods","GET, POST, OPTIONS");
+  headers.put("Access-Control-Allow-Headers","Content-Type");
+  headers.put("Access-Control-Expose-Headers","X-Kittens-SHA256, X-Kittens-Length");
+  headers.put("Access-Control-Max-Age","600");
+  reply(s,status,type,data,headers);
+ }
  private void reply(Socket s,int status,String type,byte[] data)throws IOException{reply(s,status,type,data,Collections.emptyMap());}
  private void reply(Socket s,int status,String type,byte[] data,Map<String,String> extra)throws IOException{
   OutputStream o=s.getOutputStream();
