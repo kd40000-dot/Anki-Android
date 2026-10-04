@@ -80,14 +80,14 @@ final class LocalGameServer {
    InputStream in=new BufferedInputStream(s.getInputStream());
    String[] request=line(in).split(" ");
    if(request.length<2)return;
-   int length=readHeaders(in);
-   if(length<0||length>MAX_BODY)throw new IOException("Body too large: "+length);
+   HttpMeta meta=readHeaders(in);
+   if(meta.length>MAX_BODY)throw new IOException("Body too large: "+meta.length);
    String path=URLDecoder.decode(request[1].split("\\?")[0],"UTF-8");
    if(path.contains("..")||path.indexOf('\0')>=0){reply(s,403,"application/json","{\"state\":\"error\",\"message\":\"Invalid path\"}".getBytes(StandardCharsets.UTF_8));return;}
    byte[] data;String type="application/json";
 
    if(request[0].equals("POST")&&path.equals("/complication-state")){
-    data=in.readNBytes(length);if(data.length!=length)throw new IOException("Incomplete complication body");
+    data=readBody(in,meta);
     ComplicationStore.saveSnapshot(context,new String(data,StandardCharsets.UTF_8));
     data="{\"ok\":true}".getBytes(StandardCharsets.UTF_8);
    }else if(request[0].equals("POST")&&path.equals("/open-complication-settings")){
@@ -95,14 +95,14 @@ final class LocalGameServer {
     context.startActivity(intent);
     data="{\"ok\":true}".getBytes(StandardCharsets.UTF_8);
    }else if(request[0].equals("POST")&&(path.equals("/backup")||path.equals("/save-manual"))){
-    byte[] body=in.readNBytes(length);if(body.length!=length)throw new IOException("Incomplete save body");
+    byte[] body=readBody(in,meta);
     data=(path.equals("/save-manual")?manualSave(body):internalSave(body)).getBytes(StandardCharsets.UTF_8);
    }else if(request[0].equals("POST")&&path.equals("/diagnostic/report")){
-    byte[] body=in.readNBytes(length);if(body.length!=length)throw new IOException("Incomplete diagnostic report");
+    byte[] body=readBody(in,meta);
     String report=new String(body,StandardCharsets.UTF_8);new org.json.JSONObject(report);diagnosticReport=report;
     data="{\"state\":\"success\"}".getBytes(StandardCharsets.UTF_8);
    }else if(request[0].equals("POST")&&path.equals("/diagnostic/snapshot")){
-    byte[] body=in.readNBytes(length);if(body.length!=length)throw new IOException("Incomplete diagnostic snapshot");
+    byte[] body=readBody(in,meta);
     org.json.JSONObject parsed=new org.json.JSONObject(new String(body,StandardCharsets.UTF_8));
     diagnosticExport=parsed.getString("exportText");
     data=("{\"state\":\"success\",\"characters\":"+diagnosticExport.length()+",\"sha256\":\""+sha256(diagnosticExport)+"\"}").getBytes(StandardCharsets.UTF_8);
@@ -112,7 +112,7 @@ final class LocalGameServer {
     if(diagnosticExport==null)throw new IllegalStateException("No verified diagnostic snapshot is available.");
     data=startTransfer(diagnosticExport).getBytes(StandardCharsets.UTF_8);
    }else if(request[0].equals("POST")&&path.equals("/transfer/start")){
-    byte[] body=in.readNBytes(length);if(body.length!=length)throw new IOException("Incomplete transfer body");
+    byte[] body=readBody(in,meta);
     org.json.JSONObject parsed=new org.json.JSONObject(new String(body,StandardCharsets.UTF_8));
     data=startTransfer(parsed.getString("exportText")).getBytes(StandardCharsets.UTF_8);
    }else if(path.equals("/transfer/status")){
@@ -129,11 +129,11 @@ final class LocalGameServer {
     stopTransfer();
     data="{\"state\":\"success\"}".getBytes(StandardCharsets.UTF_8);
    }else if(request[0].equals("POST")&&path.equals("/export")){
-    byte[] body=in.readNBytes(length);if(body.length!=length)throw new IOException("Incomplete export body");
+    byte[] body=readBody(in,meta);
     org.json.JSONObject parsed=new org.json.JSONObject(new String(body,StandardCharsets.UTF_8));
     data=copyClipboard(parsed.getString("exportText")).getBytes(StandardCharsets.UTF_8);
    }else if(request[0].equals("POST")&&path.equals("/clipboard-copy")){
-    byte[] body=in.readNBytes(length);if(body.length!=length)throw new IOException("Incomplete clipboard body");
+    byte[] body=readBody(in,meta);
     org.json.JSONObject parsed=new org.json.JSONObject(new String(body,StandardCharsets.UTF_8));
     data=copyClipboard(parsed.getString("text")).getBytes(StandardCharsets.UTF_8);
    }else if(path.equals("/clipboard-read")){
@@ -153,13 +153,37 @@ final class LocalGameServer {
   }
  }
 
- private int readHeaders(InputStream in)throws IOException{
-  int length=0;String h;
+ private static final class HttpMeta{int length=-1;boolean chunked=false;}
+ private HttpMeta readHeaders(InputStream in)throws IOException{
+  HttpMeta m=new HttpMeta();String h;
   while(!(h=line(in)).isEmpty()){
    String lower=h.toLowerCase(Locale.ROOT);
-   if(lower.startsWith("content-length:"))length=Integer.parseInt(h.substring(15).trim());
+   if(lower.startsWith("content-length:"))m.length=Integer.parseInt(h.substring(15).trim());
+   else if(lower.startsWith("transfer-encoding:")&&lower.contains("chunked"))m.chunked=true;
   }
-  return length;
+  return m;
+ }
+ private byte[] readBody(InputStream in,HttpMeta m)throws IOException{
+  if(m.chunked)return readChunked(in);
+  if(m.length<0)return new byte[0];
+  if(m.length>MAX_BODY)throw new IOException("Body too large: "+m.length);
+  byte[] body=in.readNBytes(m.length);
+  if(body.length!=m.length)throw new EOFException("Request body ended early: expected "+m.length+" bytes, got "+body.length);
+  return body;
+ }
+ private byte[] readChunked(InputStream in)throws IOException{
+  ByteArrayOutputStream out=new ByteArrayOutputStream();
+  while(true){
+   String sizeLine=line(in).trim();if(sizeLine.isEmpty())continue;
+   int semi=sizeLine.indexOf(';');if(semi>=0)sizeLine=sizeLine.substring(0,semi);
+   int size;try{size=Integer.parseInt(sizeLine.trim(),16);}catch(NumberFormatException e){throw new IOException("Invalid chunk size: "+sizeLine,e);}
+   if(size<0||out.size()+size>MAX_BODY)throw new IOException("Chunked body exceeds "+MAX_BODY+" bytes");
+   if(size==0){while(!line(in).isEmpty()){}break;}
+   byte[] chunk=in.readNBytes(size);if(chunk.length!=size)throw new EOFException("Chunk ended early");
+   out.write(chunk);
+   String terminator=line(in);if(!terminator.isEmpty())throw new IOException("Invalid chunk terminator");
+  }
+  return out.toByteArray();
  }
 
  private synchronized String startTransfer(String exportText){
@@ -259,8 +283,8 @@ final class LocalGameServer {
    InputStream in=new BufferedInputStream(s.getInputStream());
    String[] request=line(in).split(" ");
    if(request.length<2)return;
-   int length=readHeaders(in);
-   if(length<0||length>MAX_BODY){reply(s,413,"text/plain","Save is too large.".getBytes(StandardCharsets.UTF_8));return;}
+   HttpMeta meta=readHeaders(in);
+   if(meta.length>MAX_BODY){reply(s,413,"text/plain","Save is too large.".getBytes(StandardCharsets.UTF_8));return;}
 
    String rawPath=request[1].split("\\?")[0];
    String token=transferToken;
@@ -279,8 +303,7 @@ final class LocalGameServer {
     headers.put("Content-Disposition","attachment; filename=\""+filename+"\"");
     reply(s,200,"text/plain",save.getBytes(StandardCharsets.UTF_8),headers);
    }else if(request[0].equals("POST")&&action.equals("import")){
-    byte[] body=in.readNBytes(length);
-    if(body.length!=length)throw new IOException("Import upload was incomplete.");
+    byte[] body=readBody(in,meta);
     String text=new String(body,StandardCharsets.UTF_8).trim();
     if(text.isEmpty())throw new IOException("Uploaded save is empty.");
     String incomingSha=sha256(text);
