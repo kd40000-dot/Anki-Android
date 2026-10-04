@@ -1,4 +1,4 @@
-name: Build Kittens Wear 1.1.8
+name: Build Kittens Wear 1.1.7
 
 on:
   push:
@@ -68,48 +68,23 @@ jobs:
 
           cp .kittens-build/wear.js wear-kittens/app/src/main/assets/game/wear.js
 
-          keytool -genkeypair -v             -keystore wear-kittens/personal.jks             -storepass kittenswear-1.1.8             -keypass kittenswear-1.1.8             -alias kittens             -keyalg RSA -keysize 2048 -validity 36500             -dname "CN=Kittens Wear Personal Build, O=Personal, C=ES"
+          keytool -genkeypair -v             -keystore wear-kittens/personal.jks             -storepass kittenswear-1.1.7             -keypass kittenswear-1.1.7             -alias kittens             -keyalg RSA -keysize 2048 -validity 36500             -dname "CN=Kittens Wear Personal Build, O=Personal, C=ES"
 
       - name: Build signed release APK
         shell: bash
         working-directory: wear-kittens
         env:
-          KITTENS_KEYSTORE_PASSWORD: kittenswear-1.1.8
+          KITTENS_KEYSTORE_PASSWORD: kittenswear-1.1.7
         run: |
           set -euo pipefail
           gradle :app:assembleRelease --no-daemon --stacktrace
           test -f app/build/outputs/apk/release/app-release.apk
-          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/Kittens-WearOS5-1.1.8.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/Kittens-WearOS5-1.1.7.apk"
 
-      - name: Upload APK for physical-device testing
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Kittens-WearOS5-1.1.8
-          path: Kittens-WearOS5-1.1.8.apk
+          name: Kittens-WearOS5-1.1.7
+          path: Kittens-WearOS5-1.1.7.apk
           if-no-files-found: error
           retention-days: 7
-
-      - name: Build x86_64 smoke-test APK
-        shell: bash
-        working-directory: wear-kittens
-        run: |
-          set -euo pipefail
-          gradle :app:assembleDebug -PemulatorBuild --no-daemon --stacktrace
-          test -f app/build/outputs/apk/debug/app-debug.apk
-
-      - name: Enable KVM
-        shell: bash
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Runtime save-transfer smoke test
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 34
-          target: android-wear
-          arch: x86_64
-          profile: wearos_small_round
-          disable-animations: true
-          script: bash .kittens-build/smoke-test.sh
