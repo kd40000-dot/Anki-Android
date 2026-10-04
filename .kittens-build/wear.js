@@ -19,9 +19,34 @@
  function wearEsc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
  async function waitNative(url){for(;;){await new Promise(r=>setTimeout(r,500));const q=await fetch(url,{cache:'no-store'});let x;try{x=await q.json();}catch(e){throw new Error('Native operation returned invalid JSON: '+e.message);}if(x.state!=='waiting')return x;}}
  function opError(title,x){detail('<h2>'+wearEsc(title)+'</h2><p><b>Operation:</b> '+wearEsc(x.operation||'unknown')+'</p><p><b>Error type:</b> '+wearEsc(x.type||'unknown')+'</p><p><b>Message:</b> '+wearEsc(x.message||'No message')+'</p>'+(x.cause?'<p><b>Cause:</b> '+wearEsc(x.cause)+'</p>':'')+(x.detail?'<p><b>Details:</b> '+wearEsc(x.detail)+'</p>':''));}
+ function captureSaveData(){
+  const gp=window.gamePage||window.game;
+  if(!gp)throw new Error('GamePage instance is unavailable.');
+  if(typeof gp.save==='function')return gp.save();
+  let proto=Object.getPrototypeOf(gp);
+  while(proto){
+   const d=Object.getOwnPropertyDescriptor(proto,'save');
+   if(d&&typeof d.value==='function')return d.value.call(gp);
+   proto=Object.getPrototypeOf(proto);
+  }
+  const raw=LCstorage[KEY];
+  if(!raw)throw new Error('No callable save serializer and no existing local save were found.');
+  const json=raw[0]==='{'?raw:gp.decompressLZData(raw);
+  if(!json||json[0]!=='{')throw new Error('Existing local save could not be decoded.');
+  return JSON.parse(json);
+ }
+ function captureExportText(){
+  const gp=window.gamePage||window.game;
+  if(!gp||typeof gp.compressLZData!=='function')throw new Error('Kittens Game compression API is unavailable.');
+  return gp.compressLZData(JSON.stringify(captureSaveData()));
+ }
+ function saveApiDiagnostic(){
+  const gp=window.gamePage||null,g=window.game||null;
+  return 'typeof game.save='+(g?typeof g.save:'no-game')+', typeof gamePage.save='+(gp?typeof gp.save:'no-gamePage');
+ }
  function stopTransferPoll(){if(transferPoll){clearInterval(transferPoll);transferPoll=0;}}
  async function safetyBackup(){
-  const r=await fetch('/save-manual',{method:'POST',body:JSON.stringify(game.save()),keepalive:true});
+  const r=await fetch('/save-manual',{method:'POST',body:JSON.stringify(captureSaveData()),keepalive:true});
   let x;try{x=await r.json();}catch(e){throw new Error('Safety backup returned invalid JSON: '+e.message);}
   if(!r.ok||x.state==='error')throw Object.assign(new Error(x.message||'Safety backup failed'),{details:x});
   return x;
@@ -29,7 +54,7 @@
  async function showTransferSave(){
   stopTransferPoll();
   try{
-   const exportText=game.compressLZData(JSON.stringify(game.save()));
+   const exportText=captureExportText();
    const r=await fetch('/transfer/start',{method:'POST',body:JSON.stringify({exportText})});
    const x=await r.json();
    if(!r.ok||x.state!=='success'){opError('Transfer could not start',x);return;}
@@ -92,14 +117,14 @@
    };
    await poll();transferPoll=setInterval(poll,1000);
   }catch(e){
-   opError('Transfer failed',{operation:'transfer-start',type:e.name||'TransferError',message:e.message||String(e),detail:'Make sure the watch has a Wi-Fi connection. The Fairphone and watch must be reachable on the same local network.'});
+   opError('Transfer failed',{operation:'transfer-start',type:e.name||'TransferError',message:e.message||String(e),detail:'Transfer setup failed before or while starting the LAN server. '+saveApiDiagnostic()+' If a URL was never shown, this is not a phone/Wi-Fi reachability error.'});
   }
  }
  function showAdvanced(){
   const box=node('div');box.append(node('h2',{},'Advanced / fallback'),node('p',{},'Clipboard transfer is kept as a fallback when LAN transfer is unavailable.'));
   button('Export via clipboard',async()=>{
    try{
-    const text=game.compressLZData(JSON.stringify(game.save()));showExportBox(text);
+    const text=captureExportText();showExportBox(text);
     const response=await fetch('/export',{method:'POST',body:JSON.stringify({exportText:text})});
     const x=await response.json();const msg=$id('wearExportStatus');
     if(x.state==='success'){msg.textContent='Copied to Android clipboard · '+x.characters+' characters';status('Save copied to clipboard');}
@@ -138,7 +163,7 @@
  button('Complication resource',async()=>{try{const r=await fetch('/open-complication-settings',{method:'POST'});if(!r.ok)throw Error();}catch(e){status('Could not open complication settings');}},settings);
  button('Reset / prestige',()=>game.reset(),settings);
  settings.append(node('p',{},'Swipe up to scroll. Tap Details for costs and effects. Transfer save opens a temporary local web page for your phone. Your game saves every 10 seconds and when you leave. Offline progress follows the original game rules.'));
- button('About & credits',()=>detail('<h2>Kittens Wear 1.1.6</h2><p>Personal offline adaptation for Wear OS. Original game by bloodrizer and contributors.</p><p>Based on Kittens Game '+version+'. Bundles Mozilla GeckoView (MPL 2.0).</p><p>Original game: kittensgame.com/web/</p><p>Source: github.com/nuclear-unicorn/kittensgame</p><p>Game code retains its WET PAWS LICENSE; this build is for personal use.</p><p>Engine sources: archive.mozilla.org/pub/firefox/releases/140.0.4/source/</p><p>All original acknowledgements:</p>'+$id('creditsDiv').innerHTML),settings);
+ button('About & credits',()=>detail('<h2>Kittens Wear 1.1.7</h2><p>Personal offline adaptation for Wear OS. Original game by bloodrizer and contributors.</p><p>Based on Kittens Game '+version+'. Bundles Mozilla GeckoView (MPL 2.0).</p><p>Original game: kittensgame.com/web/</p><p>Source: github.com/nuclear-unicorn/kittensgame</p><p>Game code retains its WET PAWS LICENSE; this build is for personal use.</p><p>Engine sources: archive.mozilla.org/pub/firefox/releases/140.0.4/source/</p><p>All original acknowledgements:</p>'+$id('creditsDiv').innerHTML),settings);
  const state=node('p',{id:'wearStatus'},'Starting your forest…');document.body.append(state);
  const menu=node('section',{id:'wearMenu',hidden:true});menu.append(node('h2',{},'Your village'),nav);button('Back to game',()=>menu.hidden=true,menu);document.body.append(menu);nav.addEventListener('click',()=>menu.hidden=true);const top=button('Menu',()=>{menu.hidden=false;menu.scrollTop=0;},document.body);top.id='wearHome';
  const sheet=node('section',{id:'wearDetail',hidden:true});sheet.append(node('div',{id:'wearDetailBody'}));button('Close',()=>sheet.hidden=true,sheet);document.body.append(sheet);
@@ -158,7 +183,7 @@
    });
   }
  }
- async function save(manual){if(!ready || game.currentSaveIsBroken){if(manual)opError('Save failed',{operation:'save',type:'GameStateError',message:'The game is not ready to save or reports the current save as broken.',detail:'No new save file was created.'});return;}try{let data=game.save();const endpoint=manual?'/save-manual':'/backup';const r=await fetch(endpoint,{method:'POST',body:JSON.stringify(data),keepalive:true});let x;try{x=await r.json();}catch(e){throw new Error('Save service returned invalid JSON: '+e.message);}if(!r.ok||x.state==='error'){if(manual)opError('Save failed',x);return;}if(manual){let msg='<h2>Save complete</h2><p><b>'+wearEsc(x.fileName||'KittensGame save')+'</b></p><p>Location: <b>'+wearEsc(x.location||'internal storage')+'</b></p><p>Internal recovery copy: <b>'+(x.internal?'OK':'FAILED')+'</b><br>Visible timestamped copy: <b>'+(x.visible?'OK':'FAILED')+'</b></p>';if(x.detail)msg+='<p><b>Warnings:</b> '+wearEsc(x.detail)+'</p>';detail(msg);}}catch(e){if(manual)opError('Save failed',{operation:'save',type:e.name,message:e.message,detail:'The request to the native save service failed.'});}}
+ async function save(manual){if(!ready || game.currentSaveIsBroken){if(manual)opError('Save failed',{operation:'save',type:'GameStateError',message:'The game is not ready to save or reports the current save as broken.',detail:'No new save file was created.'});return;}try{let data=captureSaveData();const endpoint=manual?'/save-manual':'/backup';const r=await fetch(endpoint,{method:'POST',body:JSON.stringify(data),keepalive:true});let x;try{x=await r.json();}catch(e){throw new Error('Save service returned invalid JSON: '+e.message);}if(!r.ok||x.state==='error'){if(manual)opError('Save failed',x);return;}if(manual){let msg='<h2>Save complete</h2><p><b>'+wearEsc(x.fileName||'KittensGame save')+'</b></p><p>Location: <b>'+wearEsc(x.location||'internal storage')+'</b></p><p>Internal recovery copy: <b>'+(x.internal?'OK':'FAILED')+'</b><br>Visible timestamped copy: <b>'+(x.visible?'OK':'FAILED')+'</b></p>';if(x.detail)msg+='<p><b>Warnings:</b> '+wearEsc(x.detail)+'</p>';detail(msg);}}catch(e){if(manual)opError('Save failed',{operation:'save',type:e.name,message:e.message,detail:'The request to the native save service failed.'});}}
  async function importSave(text){
   text=text.trim();const parsed=JSON.parse(text.startsWith('{')?text:game.decompressLZData(text));text=game.compressLZData(JSON.stringify(parsed));if(!parsed || !Array.isArray(parsed.resources) || !parsed.game)throw Error('Not a Kittens Game save');const previous=LCstorage[KEY];
   return new Promise((resolve,reject)=>game.saveImportText(text,error=>{if(error){LCstorage[KEY]=previous;game.load();game.render();reject(error);}else{game.opts.enableRedshift=true;game.opts.useWorkers=false;save(false);go('play');resolve();}}));
@@ -206,6 +231,6 @@
   if(document.hidden){syncComplication(true);save(false);clearInterval(game._mainTimer);game._mainTimer=null;suspended=true;}
   else if(suspended){suspended=false;if(!game.isPaused)game.time.calculateRedshift();game.start();update();syncComplication(true);}
  });
- window.addEventListener('pagehide',()=>{if(ready)game.save();});
+ window.addEventListener('pagehide',()=>{if(ready){try{captureSaveData();}catch(e){console.error('Page-exit save failed',e,saveApiDiagnostic());}}});
  document.body.dataset.page='play';
 })();
