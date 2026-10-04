@@ -334,20 +334,24 @@
     try{installDetails();wearDetailsInstalled=true;g.render();}catch(e){console.warn('Wear details enhancement failed',e);}
    }
 
-   ready=true;
    g.opts.disableTelemetry=true;
    g.opts.enableRedshift=true;
    g.opts.useWorkers=false;
    g.autosaveFrequency=50;
 
-   const importNotice=finishImportTransaction();
-   status(importNotice||'Offline · saved on this watch');
-   go('play');
-   syncComplication(true);
-
    await postDiagnostic({state:'loading',stage:'save-self-test-start',version:'1.1.8'},null);
    const tested=await runSaveSelfTest();
+
+   const tx=importTx();
+   if(tx&&tx.state==='pending'&&tx.year!==undefined&&tx.year!==null&&Number(tested.snapshot.year)!==Number(tx.year)){
+    throw new Error('Imported save loaded a different calendar year than the staged save.');
+   }
+
+   ready=true;
+   const importNotice=finishImportTransaction();
    status(importNotice||'Offline · save system verified');
+   go('play');
+   syncComplication(true);
    await postDiagnostic(Object.assign({},tested.report,{state:'success',stage:'ready'}),tested.snapshot);
 
    setInterval(()=>{if(!document.hidden){update();syncComplication(false);}},1000);
