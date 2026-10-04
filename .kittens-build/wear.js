@@ -298,24 +298,85 @@
    await fetch('/complication-state',{method:'POST',body:JSON.stringify({resources:list}),keepalive:true});
   }catch(e){console.warn('Complication sync failed',e);}
  }
- const originalInit=window.initGame;
- window.initGame=async function(){
+ let wearBootStarted=false,wearDetailsInstalled=false,wearBootDeadline=Date.now()+60000;
+ async function wearBootReady(){
+  if(wearBootStarted)return;
+  wearBootStarted=true;
   try{
-   await postDiagnostic({state:'loading',stage:'init-enter',version:'1.1.8'},null);
-   if(!LCstorage[KEY]){try{const r=await fetch('/restore'),backup=await r.json();if(backup&&backup.saveVersion)LCstorage[KEY]=JSON.stringify(backup);}catch(e){}}
-   classes.game.Server.prototype.refresh=function(){};classes.game.Server.prototype.fetchBcoinPrice=function(){return $.Deferred().resolve().promise();};installDetails();originalInit();
-   await postDiagnostic({state:'loading',stage:'original-init-returned',version:'1.1.8',hasGame:!!window.game,hasResPool:!!(window.game&&window.game.resPool)},null);
-   if(!window.game||!game.resPool)throw Error('Game engine did not initialize');
-   if(game.currentSaveIsBroken){if(rollbackPendingImport('Imported save was rejected by the game engine'))return;throw Error('Game engine reports the current save as broken');}
-   ready=true;game.opts.disableTelemetry=true;game.opts.enableRedshift=true;game.opts.useWorkers=false;game.autosaveFrequency=50;
+   await postDiagnostic({state:'loading',stage:'game-detected',version:'1.1.8',hasGame:!!window.game,hasResPool:!!(window.game&&window.game.resPool)},null);
+   const g=gameRoot();
+
+   if(!LCstorage[KEY]){
+    try{
+     const rr=await fetch('/restore',{cache:'no-store'}),backup=await rr.json();
+     if(backup&&backup.saveVersion){
+      validateSaveObject(backup);
+      LCstorage[KEY]=encodeSaveObject(backup);
+      await postDiagnostic({state:'loading',stage:'native-backup-restored',version:'1.1.8'},null);
+      location.reload();return;
+     }
+    }catch(e){console.warn('Native recovery backup unavailable',e);}
+   }
+
+   if(g.currentSaveIsBroken){
+    if(rollbackPendingImport('Imported save was rejected by the game engine'))return;
+    throw Error('Game engine reports the current save as broken');
+   }
+
+   try{
+    if(window.classes&&classes.game&&classes.game.Server){
+     classes.game.Server.prototype.refresh=function(){};
+     classes.game.Server.prototype.fetchBcoinPrice=function(){return $.Deferred().resolve().promise();};
+    }
+   }catch(e){console.warn('Offline server patch failed',e);}
+
+   if(!wearDetailsInstalled){
+    try{installDetails();wearDetailsInstalled=true;g.render();}catch(e){console.warn('Wear details enhancement failed',e);}
+   }
+
+   ready=true;
+   g.opts.disableTelemetry=true;
+   g.opts.enableRedshift=true;
+   g.opts.useWorkers=false;
+   g.autosaveFrequency=50;
+
    const importNotice=finishImportTransaction();
-   status(importNotice||'Offline · saved on this watch');go('play');
+   status(importNotice||'Offline · saved on this watch');
+   go('play');
    syncComplication(true);
-   runSaveSelfTest().catch(e=>console.error('Save self-test failed',e));
+
+   await postDiagnostic({state:'loading',stage:'save-self-test-start',version:'1.1.8'},null);
+   const tested=await runSaveSelfTest();
+   status(importNotice||'Offline · save system verified');
+   await postDiagnostic(Object.assign({},tested.report,{state:'success',stage:'ready'}),tested.snapshot);
+
    setInterval(()=>{if(!document.hidden){update();syncComplication(false);}},1000);
    setInterval(()=>{if(!document.hidden)save(false);},10000);
-  }catch(e){if(rollbackPendingImport(e.message))return;status('Startup failed: '+e.message);console.error(e);postDiagnostic({state:'error',stage:'startup',version:'1.1.8',type:e.name||'Error',message:e.message||String(e)},null);}
- };
+  }catch(e){
+   ready=false;
+   if(rollbackPendingImport(e.message))return;
+   status('Startup failed: '+e.message);
+   console.error(e);
+   await postDiagnostic(e.details||{state:'error',stage:'wear-boot',version:'1.1.8',type:e.name||'Error',message:e.message||String(e)},null);
+  }
+ }
+ function wearBootPoll(){
+  if(wearBootStarted)return;
+  try{
+   const g=window.game;
+   if(g&&g.resPool&&g.calendar&&g.village&&g.server&&g.console){wearBootReady();return;}
+  }catch(e){}
+  if(Date.now()>wearBootDeadline){
+   wearBootStarted=true;
+   status('Startup failed: game engine was not detected');
+   postDiagnostic({state:'error',stage:'wait-for-game',version:'1.1.8',type:'TimeoutError',message:'Kittens Game did not expose its initialized game object within 60 seconds.'},null);
+   return;
+  }
+  setTimeout(wearBootPoll,100);
+ }
+ postDiagnostic({state:'loading',stage:'wear-script-loaded',version:'1.1.8'},null).catch(()=>{});
+ wearBootPoll();
+
  document.addEventListener('visibilitychange',()=>{
   if(!ready)return;
   if(document.hidden){syncComplication(true);save(false);clearInterval(game._mainTimer);game._mainTimer=null;suspended=true;}
