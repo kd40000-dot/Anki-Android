@@ -88,6 +88,7 @@
   try{await fetch('/diagnostic/report',{method:'POST',body:JSON.stringify(report),keepalive:true});}catch(e){}
   if(snapshot)try{await fetch('/diagnostic/snapshot',{method:'POST',body:JSON.stringify({exportText:snapshot.exportText}),keepalive:true});}catch(e){}
  }
+ postDiagnostic({state:'loading',stage:'wear-js-loaded',version:'1.1.8'},null);
  async function runSaveSelfTest(){
   try{
    const snap=verifiedSnapshot();
@@ -300,8 +301,10 @@
  const originalInit=window.initGame;
  window.initGame=async function(){
   try{
+   await postDiagnostic({state:'loading',stage:'init-enter',version:'1.1.8'},null);
    if(!LCstorage[KEY]){try{const r=await fetch('/restore'),backup=await r.json();if(backup&&backup.saveVersion)LCstorage[KEY]=JSON.stringify(backup);}catch(e){}}
    classes.game.Server.prototype.refresh=function(){};classes.game.Server.prototype.fetchBcoinPrice=function(){return $.Deferred().resolve().promise();};installDetails();originalInit();
+   await postDiagnostic({state:'loading',stage:'original-init-returned',version:'1.1.8',hasGame:!!window.game,hasResPool:!!(window.game&&window.game.resPool)},null);
    if(!window.game||!game.resPool)throw Error('Game engine did not initialize');
    if(game.currentSaveIsBroken){if(rollbackPendingImport('Imported save was rejected by the game engine'))return;throw Error('Game engine reports the current save as broken');}
    ready=true;game.opts.disableTelemetry=true;game.opts.enableRedshift=true;game.opts.useWorkers=false;game.autosaveFrequency=50;
