@@ -49,7 +49,10 @@
    if(!response.ok||x.state!=='success'){opError('Transfer could not start',x);return;}
    const box=node('div');
    box.append(node('h2',{},'Transfer save'));
-   box.append(node('p',{},'On your phone, open Kittens Game → Export → Watch Sync. Enter this temporary address. Both devices must be on the same Wi-Fi, or connect the watch to the phone hotspot.'));
+   box.append(node('p',{},'On your phone, open Kittens Game → Export → Watch Sync. Scan this QR code or use the temporary address below. Both devices must be on the same Wi-Fi, or connect the watch to the phone hotspot.'));
+   const qr=node('img',{src:'/transfer/qr?'+Date.now(),alt:'QR code containing transfer address'});
+   qr.style.width='180px';qr.style.height='180px';qr.style.display='block';qr.style.margin='8px auto';qr.style.background='#fff';qr.style.borderRadius='8px';
+   box.append(qr);
    const url=node('textarea',{readOnly:true,rows:3,value:x.url});
    url.style.width='100%';url.style.boxSizing='border-box';url.style.fontSize='12px';
    url.onclick=()=>{url.focus();url.select();};
