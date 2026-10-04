@@ -27,6 +27,7 @@ for i in $(seq 1 120); do
     fi
     if [ "$state" = error ]; then
       echo "Runtime self-test failed"
+      dump_debug
       exit 1
     fi
   fi
@@ -34,6 +35,7 @@ for i in $(seq 1 120); do
 done
 if [ "$ok" != 1 ]; then
   echo "Timed out waiting for runtime save self-test"
+  dump_debug
   exit 1
 fi
 
