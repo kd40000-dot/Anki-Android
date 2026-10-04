@@ -1,0 +1,43 @@
+name: Export Android APK tooling
+
+on:
+  push:
+    branches:
+      - tooling-export-temp
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android build tools and apktool
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANDROID_HOME="$HOME/android-sdk"
+          mkdir -p "$ANDROID_HOME/cmdline-tools"
+          curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o /tmp/cmdline-tools.zip
+          unzip -q /tmp/cmdline-tools.zip -d /tmp/android-cmdline
+          mv /tmp/android-cmdline/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "build-tools;35.0.0"
+          mkdir -p out
+          cp "$ANDROID_HOME/build-tools/35.0.0/apksigner" out/
+          cp "$ANDROID_HOME/build-tools/35.0.0/zipalign" out/
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" out/
+          curl -fsSL https://github.com/iBotPeaches/Apktool/releases/download/v3.0.3/apktool_3.0.3.jar -o out/apktool.jar
+          chmod +x out/apksigner out/zipalign
+      - name: Upload tooling
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-tooling
+          path: out/
+          retention-days: 1
