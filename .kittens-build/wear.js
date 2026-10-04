@@ -1,8 +1,7 @@
 (function(){
  'use strict';
  const KEY='com.nuclearunicorn.kittengame.savedata';
- const IMPORT_TX_KEY='com.balthazar.kittenswear.importtx', IMPORT_ROLLBACK_KEY='com.balthazar.kittenswear.rollback';
- let ready=false, suspended=false, lastTabList='', page='play', lastComplicationSync=0, transferPoll=0, lastSelfTest=null;
+ let ready=false, suspended=false, lastTabList='', page='play', lastComplicationSync=0, transferPoll=0;
  const $id=id=>document.getElementById(id);
  function node(tag,attrs,text){let n=document.createElement(tag);Object.assign(n,attrs||{});if(text!==undefined)n.textContent=text;return n;}
  function button(text,fn,parent){let b=node('button',{type:'button',className:'wear-button'},text);b.onclick=fn;parent.appendChild(b);return b;}
@@ -20,101 +19,34 @@
  function wearEsc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
  async function waitNative(url){for(;;){await new Promise(r=>setTimeout(r,500));const q=await fetch(url,{cache:'no-store'});let x;try{x=await q.json();}catch(e){throw new Error('Native operation returned invalid JSON: '+e.message);}if(x.state!=='waiting')return x;}}
  function opError(title,x){detail('<h2>'+wearEsc(title)+'</h2><p><b>Operation:</b> '+wearEsc(x.operation||'unknown')+'</p><p><b>Error type:</b> '+wearEsc(x.type||'unknown')+'</p><p><b>Message:</b> '+wearEsc(x.message||'No message')+'</p>'+(x.cause?'<p><b>Cause:</b> '+wearEsc(x.cause)+'</p>':'')+(x.detail?'<p><b>Details:</b> '+wearEsc(x.detail)+'</p>':''));}
- function methodOf(obj,name){
-  if(!obj)return null;
-  if(typeof obj[name]==='function')return obj[name];
-  let p=Object.getPrototypeOf(obj);
-  while(p){const d=Object.getOwnPropertyDescriptor(p,name);if(d&&typeof d.value==='function')return d.value;p=Object.getPrototypeOf(p);}
-  return null;
- }
- function invoke(obj,name,args,label){const fn=methodOf(obj,name);if(!fn)throw new Error((label||name)+' has no callable '+name+' method');return fn.apply(obj,args||[]);}
- function gameRoot(){
-  const out=[],seen=new Set();
-  const add=x=>{if(x&&typeof x==='object'&&!seen.has(x)){seen.add(x);out.push(x);}};
-  add(window.gamePage);add(window.game);
-  for(let i=0;i<out.length&&i<40;i++){
-   const x=out[i];for(const k of ['game','resPool','calendar','village','bld','science','workshop','ui','server','time','religion']){try{add(x[k]&&x[k].game?x[k].game:null);}catch(e){}}
+ function captureSaveData(){
+  const gp=window.gamePage||window.game;
+  if(!gp)throw new Error('GamePage instance is unavailable.');
+  if(typeof gp.save==='function')return gp.save();
+  let proto=Object.getPrototypeOf(gp);
+  while(proto){
+   const d=Object.getOwnPropertyDescriptor(proto,'save');
+   if(d&&typeof d.value==='function')return d.value.call(gp);
+   proto=Object.getPrototypeOf(proto);
   }
-  for(const x of out){if(x.resPool&&x.calendar&&x.village&&Array.isArray(x.managers)&&x.server&&x.console)return x;}
-  throw new Error('Could not locate the live Kittens Game state root. Candidates checked: '+out.length);
+  const raw=LCstorage[KEY];
+  if(!raw)throw new Error('No callable save serializer and no existing local save were found.');
+  const json=raw[0]==='{'?raw:gp.decompressLZData(raw);
+  if(!json||json[0]!=='{')throw new Error('Existing local save could not be decoded.');
+  return JSON.parse(json);
  }
- function validateSaveObject(d){
-  if(!d||typeof d!=='object'||Array.isArray(d))throw new Error('Save root is not an object.');
-  if(d.saveVersion===undefined||d.saveVersion===null)throw new Error('Save has no saveVersion.');
-  if(!Array.isArray(d.resources)||d.resources.length===0)throw new Error('Save has no resource list.');
-  if(!d.game||typeof d.game!=='object')throw new Error('Save has no game section.');
-  if(!d.calendar||typeof d.calendar!=='object')throw new Error('Save has no calendar section.');
-  if(!d.resources.some(r=>r&&r.name==='catnip'))throw new Error('Save resource list has no catnip entry.');
-  return d;
+ function captureExportText(){
+  const gp=window.gamePage||window.game;
+  if(!gp||typeof gp.compressLZData!=='function')throw new Error('Kittens Game compression API is unavailable.');
+  return gp.compressLZData(JSON.stringify(captureSaveData()));
  }
- function lz(){
-  if(!window.LZString||typeof LZString.compressToBase64!=='function'||typeof LZString.decompressFromBase64!=='function')throw new Error('Bundled LZString library is unavailable.');
-  return LZString;
- }
- function encodeSaveObject(data){return lz().compressToBase64(JSON.stringify(validateSaveObject(data)));}
- function decodeSaveBlob(text){
-  if(typeof text!=='string')throw new Error('Save input is not text.');
-  const trimmed=text.trim();if(!trimmed)throw new Error('Save input is empty.');
-  let json=trimmed[0]==='{'?trimmed:null;
-  if(!json){const compact=trimmed.replace(/\s/g,'');try{json=lz().decompressFromBase64(compact);}catch(e){}if(!json||json[0]!=='{'){try{json=lz().decompressFromUTF16(trimmed);}catch(e){}}}
-  if(!json||json[0]!=='{')throw new Error('Save is neither JSON nor a supported Kittens Game LZ export.');
-  let parsed;try{parsed=JSON.parse(json);}catch(e){throw new Error('Save JSON could not be parsed: '+e.message);}
-  return validateSaveObject(parsed);
- }
- function serializeLiveGame(){
-  const g=gameRoot();
-  if(g.currentSaveIsBroken)throw new Error('The running game marks its current save as broken.');
-  g.ticksBeforeSave=g.autosaveFrequency;
-  const d={saveVersion:g.saveVersion};
-  invoke(g.server,'save',[d],'server');invoke(g.resPool,'save',[d],'resources');invoke(g.village,'save',[d],'village');invoke(g.calendar,'save',[d],'calendar');invoke(g.console,'save',[d],'console');
-  if(g.telemetry)invoke(g.telemetry,'save',[d],'telemetry');
-  for(let i=0;i<g.managers.length;i++)invoke(g.managers[i],'save',[d],'manager['+i+']');
-  d.game={isCMBREnabled:g.isCMBREnabled,colorScheme:g.colorScheme,unlockedSchemes:g.unlockedSchemes,karmaKittens:g.karmaKittens,karmaZebras:g.karmaZebras,ironWill:g.ironWill,deadKittens:g.deadKittens,cheatMode:g.cheatMode,startedWithoutChronospheres:g.startedWithoutChronospheres,opts:g.opts,lastBackup:g.lastBackup};
-  const pub=methodOf(g,'_publish');if(pub)pub.call(g,'game/beforesave',d);
-  const uiSave=g.ui&&methodOf(g.ui,'save');if(uiSave)try{uiSave.call(g.ui);}catch(e){console.warn('UI settings save failed',e);}
-  return {root:g,data:validateSaveObject(d)};
- }
- function near(a,b){a=Number(a);b=Number(b);if(!Number.isFinite(a)||!Number.isFinite(b))return true;return Math.abs(a-b)<=Math.max(1e-6,Math.max(1,Math.abs(a),Math.abs(b))*1e-9);}
- function verifiedSnapshot(){
-  const x=serializeLiveGame(),g=x.root,data=x.data,exportText=encodeSaveObject(data),round=decodeSaveBlob(exportText);
-  if(String(round.saveVersion)!==String(data.saveVersion))throw new Error('Round-trip saveVersion mismatch.');
-  if(Number(round.calendar.year)!==Number(g.calendar.year))throw new Error('Round-trip calendar year mismatch.');
-  const liveCat=Number(g.resPool.get('catnip').value),savedCat=Number(round.resources.find(r=>r.name==='catnip').value);
-  if(!near(liveCat,savedCat))throw new Error('Round-trip catnip mismatch: live='+liveCat+', saved='+savedCat);
-  LCstorage[KEY]=exportText;
-  return {data,exportText,year:Number(round.calendar.year),catnip:savedCat,resources:round.resources.length,characters:exportText.length};
- }
- async function postDiagnostic(report,snapshot){
-  try{await fetch('/diagnostic/report',{method:'POST',body:JSON.stringify(report),keepalive:true});}catch(e){}
-  if(snapshot)try{await fetch('/diagnostic/snapshot',{method:'POST',body:JSON.stringify({exportText:snapshot.exportText}),keepalive:true});}catch(e){}
- }
- postDiagnostic({state:'loading',stage:'wear-js-loaded',version:'1.1.8'},null);
- async function runSaveSelfTest(){
-  try{
-   const snap=verifiedSnapshot();
-   const root=gameRoot();
-   const report={state:'success',stage:'roundtrip',version:'1.1.8',year:snap.year,catnip:snap.catnip,resources:snap.resources,characters:snap.characters,rootConstructor:(root.constructor&&root.constructor.name)||'unknown'};
-   lastSelfTest=report;await postDiagnostic(report,snap);return {report,snapshot:snap};
-  }catch(e){
-   const report={state:'error',stage:'save-self-test',version:'1.1.8',type:e.name||'Error',message:e.message||String(e)};lastSelfTest=report;await postDiagnostic(report,null);throw Object.assign(e,{details:report});
-  }
- }
- function importTx(){try{return JSON.parse(localStorage.getItem(IMPORT_TX_KEY)||'null');}catch(e){return null;}}
- function rollbackPendingImport(reason){
-  const tx=importTx(),old=localStorage.getItem(IMPORT_ROLLBACK_KEY);
-  if(tx&&tx.state==='pending'&&old){LCstorage[KEY]=old;localStorage.setItem(IMPORT_TX_KEY,JSON.stringify({state:'rolledback',reason:String(reason||'Imported save failed to boot')}));location.reload();return true;}
-  return false;
- }
- function finishImportTransaction(){
-  const tx=importTx();if(!tx)return null;
-  if(tx.state==='pending'){localStorage.removeItem(IMPORT_ROLLBACK_KEY);localStorage.removeItem(IMPORT_TX_KEY);fetch('/transfer/clear-import',{method:'POST'}).catch(()=>{});return 'Imported save from phone successfully';}
-  if(tx.state==='rolledback'){const reason=tx.reason||'Imported save failed to boot';localStorage.removeItem(IMPORT_ROLLBACK_KEY);localStorage.removeItem(IMPORT_TX_KEY);return 'Import failed; previous village restored · '+reason;}
-  return null;
+ function saveApiDiagnostic(){
+  const gp=window.gamePage||null,g=window.game||null;
+  return 'typeof game.save='+(g?typeof g.save:'no-game')+', typeof gamePage.save='+(gp?typeof gp.save:'no-gamePage');
  }
  function stopTransferPoll(){if(transferPoll){clearInterval(transferPoll);transferPoll=0;}}
  async function safetyBackup(){
-  const snap=verifiedSnapshot();
-  const r=await fetch('/save-manual',{method:'POST',body:JSON.stringify(snap.data),keepalive:true});
+  const r=await fetch('/save-manual',{method:'POST',body:JSON.stringify(captureSaveData()),keepalive:true});
   let x;try{x=await r.json();}catch(e){throw new Error('Safety backup returned invalid JSON: '+e.message);}
   if(!r.ok||x.state==='error')throw Object.assign(new Error(x.message||'Safety backup failed'),{details:x});
   return x;
@@ -122,14 +54,12 @@
  async function showTransferSave(){
   stopTransferPoll();
   try{
-   const tested=await runSaveSelfTest();
-   const exportText=tested.snapshot.exportText;
+   const exportText=captureExportText();
    const r=await fetch('/transfer/start',{method:'POST',body:JSON.stringify({exportText})});
    const x=await r.json();
    if(!r.ok||x.state!=='success'){opError('Transfer could not start',x);return;}
    const box=node('div');
    box.append(node('h2',{},'Transfer save'));
-   box.append(node('p',{},'Save self-test: OK · '+tested.snapshot.characters+' characters'+(x.sha256?' · SHA-256 '+x.sha256.slice(0,12)+'…':'')));
    const qr=node('img',{src:'/transfer/qr?'+Date.now(),alt:'QR code for transfer page'});
    qr.style.width='180px';qr.style.height='180px';qr.style.display='block';qr.style.margin='8px auto';qr.style.background='#fff';qr.style.borderRadius='8px';
    box.append(qr);
@@ -187,14 +117,14 @@
    };
    await poll();transferPoll=setInterval(poll,1000);
   }catch(e){
-   opError('Transfer failed',e.details||{operation:'transfer-start',type:e.name||'TransferError',message:e.message||String(e),detail:'The save self-test or LAN startup failed. Transfer never exposes an unverified save.'});
+   opError('Transfer failed',{operation:'transfer-start',type:e.name||'TransferError',message:e.message||String(e),detail:'Transfer setup failed before or while starting the LAN server. '+saveApiDiagnostic()+' If a URL was never shown, this is not a phone/Wi-Fi reachability error.'});
   }
  }
  function showAdvanced(){
   const box=node('div');box.append(node('h2',{},'Advanced / fallback'),node('p',{},'Clipboard transfer is kept as a fallback when LAN transfer is unavailable.'));
   button('Export via clipboard',async()=>{
    try{
-    const text=(await runSaveSelfTest()).snapshot.exportText;showExportBox(text);
+    const text=captureExportText();showExportBox(text);
     const response=await fetch('/export',{method:'POST',body:JSON.stringify({exportText:text})});
     const x=await response.json();const msg=$id('wearExportStatus');
     if(x.state==='success'){msg.textContent='Copied to Android clipboard · '+x.characters+' characters';status('Save copied to clipboard');}
@@ -233,7 +163,7 @@
  button('Complication resource',async()=>{try{const r=await fetch('/open-complication-settings',{method:'POST'});if(!r.ok)throw Error();}catch(e){status('Could not open complication settings');}},settings);
  button('Reset / prestige',()=>game.reset(),settings);
  settings.append(node('p',{},'Swipe up to scroll. Tap Details for costs and effects. Transfer save opens a temporary local web page for your phone. Your game saves every 10 seconds and when you leave. Offline progress follows the original game rules.'));
- button('About & credits',()=>detail('<h2>Kittens Wear 1.1.8</h2><p>Personal offline adaptation for Wear OS. Original game by bloodrizer and contributors.</p><p>Based on Kittens Game '+version+'. Bundles Mozilla GeckoView (MPL 2.0).</p><p>Original game: kittensgame.com/web/</p><p>Source: github.com/nuclear-unicorn/kittensgame</p><p>Game code retains its WET PAWS LICENSE; this build is for personal use.</p><p>Engine sources: archive.mozilla.org/pub/firefox/releases/140.0.4/source/</p><p>All original acknowledgements:</p>'+$id('creditsDiv').innerHTML),settings);
+ button('About & credits',()=>detail('<h2>Kittens Wear 1.1.7</h2><p>Personal offline adaptation for Wear OS. Original game by bloodrizer and contributors.</p><p>Based on Kittens Game '+version+'. Bundles Mozilla GeckoView (MPL 2.0).</p><p>Original game: kittensgame.com/web/</p><p>Source: github.com/nuclear-unicorn/kittensgame</p><p>Game code retains its WET PAWS LICENSE; this build is for personal use.</p><p>Engine sources: archive.mozilla.org/pub/firefox/releases/140.0.4/source/</p><p>All original acknowledgements:</p>'+$id('creditsDiv').innerHTML),settings);
  const state=node('p',{id:'wearStatus'},'Starting your forest…');document.body.append(state);
  const menu=node('section',{id:'wearMenu',hidden:true});menu.append(node('h2',{},'Your village'),nav);button('Back to game',()=>menu.hidden=true,menu);document.body.append(menu);nav.addEventListener('click',()=>menu.hidden=true);const top=button('Menu',()=>{menu.hidden=false;menu.scrollTop=0;},document.body);top.id='wearHome';
  const sheet=node('section',{id:'wearDetail',hidden:true});sheet.append(node('div',{id:'wearDetailBody'}));button('Close',()=>sheet.hidden=true,sheet);document.body.append(sheet);
@@ -253,25 +183,10 @@
    });
   }
  }
- async function save(manual){
-  if(!ready || game.currentSaveIsBroken){if(manual)opError('Save failed',{operation:'save',type:'GameStateError',message:'The game is not ready to save or reports the current save as broken.',detail:'No new save file was created.'});return;}
-  try{
-   const snap=verifiedSnapshot(),endpoint=manual?'/save-manual':'/backup';
-   const r=await fetch(endpoint,{method:'POST',body:JSON.stringify(snap.data),keepalive:true});let x;try{x=await r.json();}catch(e){throw new Error('Save service returned invalid JSON: '+e.message);}
-   if(!r.ok||x.state==='error'){if(manual)opError('Save failed',x);return;}
-   if(manual){let msg='<h2>Save complete</h2><p><b>'+wearEsc(x.fileName||'KittensGame save')+'</b></p><p>Location: <b>'+wearEsc(x.location||'internal storage')+'</b></p><p>Internal recovery copy: <b>'+(x.internal?'OK':'FAILED')+'</b><br>Visible timestamped copy: <b>'+(x.visible?'OK':'FAILED')+'</b></p><p>Serialization round-trip: <b>OK</b></p>';if(x.detail)msg+='<p><b>Warnings:</b> '+wearEsc(x.detail)+'</p>';detail(msg);}
-  }catch(e){if(manual)opError('Save failed',e.details||{operation:'save',type:e.name||'SaveError',message:e.message||String(e),detail:'Live-state serialization or native backup failed.'});}
- }
+ async function save(manual){if(!ready || game.currentSaveIsBroken){if(manual)opError('Save failed',{operation:'save',type:'GameStateError',message:'The game is not ready to save or reports the current save as broken.',detail:'No new save file was created.'});return;}try{let data=captureSaveData();const endpoint=manual?'/save-manual':'/backup';const r=await fetch(endpoint,{method:'POST',body:JSON.stringify(data),keepalive:true});let x;try{x=await r.json();}catch(e){throw new Error('Save service returned invalid JSON: '+e.message);}if(!r.ok||x.state==='error'){if(manual)opError('Save failed',x);return;}if(manual){let msg='<h2>Save complete</h2><p><b>'+wearEsc(x.fileName||'KittensGame save')+'</b></p><p>Location: <b>'+wearEsc(x.location||'internal storage')+'</b></p><p>Internal recovery copy: <b>'+(x.internal?'OK':'FAILED')+'</b><br>Visible timestamped copy: <b>'+(x.visible?'OK':'FAILED')+'</b></p>';if(x.detail)msg+='<p><b>Warnings:</b> '+wearEsc(x.detail)+'</p>';detail(msg);}}catch(e){if(manual)opError('Save failed',{operation:'save',type:e.name,message:e.message,detail:'The request to the native save service failed.'});}}
  async function importSave(text){
-  const parsed=decodeSaveBlob(text),normalized=encodeSaveObject(parsed),round=decodeSaveBlob(normalized);
-  validateSaveObject(round);
-  let previous=LCstorage[KEY];if(!previous)previous=verifiedSnapshot().exportText;
-  localStorage.setItem(IMPORT_ROLLBACK_KEY,previous);
-  localStorage.setItem(IMPORT_TX_KEY,JSON.stringify({state:'pending',at:Date.now(),year:round.calendar.year,saveVersion:round.saveVersion}));
-  LCstorage[KEY]=normalized;
-  try{await fetch('/transfer/stop',{method:'POST'});}catch(e){}
-  location.reload();
-  return new Promise(()=>{});
+  text=text.trim();const parsed=JSON.parse(text.startsWith('{')?text:game.decompressLZData(text));text=game.compressLZData(JSON.stringify(parsed));if(!parsed || !Array.isArray(parsed.resources) || !parsed.game)throw Error('Not a Kittens Game save');const previous=LCstorage[KEY];
+  return new Promise((resolve,reject)=>game.saveImportText(text,error=>{if(error){LCstorage[KEY]=previous;game.load();game.render();reject(error);}else{game.opts.enableRedshift=true;game.opts.useWorkers=false;save(false);go('play');resolve();}}));
  }
  function installDetails(){
   com.nuclearunicorn.game.ui.ContentRowRenderer.prototype.initRenderer=function(content){this.content=content;this.twoRows=false;};
@@ -298,94 +213,24 @@
    await fetch('/complication-state',{method:'POST',body:JSON.stringify({resources:list}),keepalive:true});
   }catch(e){console.warn('Complication sync failed',e);}
  }
- let wearBootStarted=false,wearDetailsInstalled=false,wearBootDeadline=Date.now()+60000;
- async function wearBootReady(){
-  if(wearBootStarted)return;
-  wearBootStarted=true;
+ const originalInit=window.initGame;
+ window.initGame=async function(){
   try{
-   await postDiagnostic({state:'loading',stage:'game-detected',version:'1.1.8',hasGame:!!window.game,hasResPool:!!(window.game&&window.game.resPool)},null);
-   const g=gameRoot();
-
-   if(!LCstorage[KEY]){
-    try{
-     const rr=await fetch('/restore',{cache:'no-store'}),backup=await rr.json();
-     if(backup&&backup.saveVersion){
-      validateSaveObject(backup);
-      LCstorage[KEY]=encodeSaveObject(backup);
-      await postDiagnostic({state:'loading',stage:'native-backup-restored',version:'1.1.8'},null);
-      location.reload();return;
-     }
-    }catch(e){console.warn('Native recovery backup unavailable',e);}
-   }
-
-   if(g.currentSaveIsBroken){
-    if(rollbackPendingImport('Imported save was rejected by the game engine'))return;
-    throw Error('Game engine reports the current save as broken');
-   }
-
-   try{
-    if(window.classes&&classes.game&&classes.game.Server){
-     classes.game.Server.prototype.refresh=function(){};
-     classes.game.Server.prototype.fetchBcoinPrice=function(){return $.Deferred().resolve().promise();};
-    }
-   }catch(e){console.warn('Offline server patch failed',e);}
-
-   if(!wearDetailsInstalled){
-    try{installDetails();wearDetailsInstalled=true;g.render();}catch(e){console.warn('Wear details enhancement failed',e);}
-   }
-
-   g.opts.disableTelemetry=true;
-   g.opts.enableRedshift=true;
-   g.opts.useWorkers=false;
-   g.autosaveFrequency=50;
-
-   await postDiagnostic({state:'loading',stage:'save-self-test-start',version:'1.1.8'},null);
-   const tested=await runSaveSelfTest();
-
-   const tx=importTx();
-   if(tx&&tx.state==='pending'&&tx.year!==undefined&&tx.year!==null&&Number(tested.snapshot.year)!==Number(tx.year)){
-    throw new Error('Imported save loaded a different calendar year than the staged save.');
-   }
-
-   ready=true;
-   const importNotice=finishImportTransaction();
-   status(importNotice||'Offline · save system verified');
-   go('play');
+   if(!LCstorage[KEY]){try{const r=await fetch('/restore'),backup=await r.json();if(backup&&backup.saveVersion)LCstorage[KEY]=JSON.stringify(backup);}catch(e){}}
+   classes.game.Server.prototype.refresh=function(){};classes.game.Server.prototype.fetchBcoinPrice=function(){return $.Deferred().resolve().promise();};installDetails();originalInit();
+   if(!window.game||!game.resPool)throw Error('Game engine did not initialize');
+   ready=true;game.opts.disableTelemetry=true;game.opts.enableRedshift=true;game.opts.useWorkers=false;game.autosaveFrequency=50;
+   status('Offline · saved on this watch');go('play');
    syncComplication(true);
-   await postDiagnostic(Object.assign({},tested.report,{state:'success',stage:'ready'}),tested.snapshot);
-
    setInterval(()=>{if(!document.hidden){update();syncComplication(false);}},1000);
    setInterval(()=>{if(!document.hidden)save(false);},10000);
-  }catch(e){
-   ready=false;
-   if(rollbackPendingImport(e.message))return;
-   status('Startup failed: '+e.message);
-   console.error(e);
-   await postDiagnostic(e.details||{state:'error',stage:'wear-boot',version:'1.1.8',type:e.name||'Error',message:e.message||String(e)},null);
-  }
- }
- function wearBootPoll(){
-  if(wearBootStarted)return;
-  try{
-   const g=window.game;
-   if(g&&g.resPool&&g.calendar&&g.village&&g.server&&g.console){wearBootReady();return;}
-  }catch(e){}
-  if(Date.now()>wearBootDeadline){
-   wearBootStarted=true;
-   status('Startup failed: game engine was not detected');
-   postDiagnostic({state:'error',stage:'wait-for-game',version:'1.1.8',type:'TimeoutError',message:'Kittens Game did not expose its initialized game object within 60 seconds.'},null);
-   return;
-  }
-  setTimeout(wearBootPoll,100);
- }
- postDiagnostic({state:'loading',stage:'wear-script-loaded',version:'1.1.8'},null).catch(()=>{});
- wearBootPoll();
-
+  }catch(e){status('Startup failed: '+e.message);console.error(e);}
+ };
  document.addEventListener('visibilitychange',()=>{
   if(!ready)return;
   if(document.hidden){syncComplication(true);save(false);clearInterval(game._mainTimer);game._mainTimer=null;suspended=true;}
   else if(suspended){suspended=false;if(!game.isPaused)game.time.calculateRedshift();game.start();update();syncComplication(true);}
  });
- window.addEventListener('pagehide',()=>{if(ready)save(false);});
+ window.addEventListener('pagehide',()=>{if(ready){try{captureSaveData();}catch(e){console.error('Page-exit save failed',e,saveApiDiagnostic());}}});
  document.body.dataset.page='play';
 })();
