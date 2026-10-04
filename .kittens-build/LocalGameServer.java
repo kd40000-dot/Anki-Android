@@ -16,7 +16,6 @@ import com.google.zxing.qrcode.QRCodeWriter;
 import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.text.SimpleDateFormat;
 import java.util.*;
@@ -33,14 +32,10 @@ final class LocalGameServer {
  private volatile ServerSocket transferSocket;
  private volatile String transferToken;
  private volatile String transferExport;
- private volatile String transferExportSha;
  private volatile String transferUrl;
  private volatile long transferExpires;
  private volatile String pendingImport;
- private volatile String pendingImportSha;
  private volatile long pendingImportId;
- private volatile String diagnosticReport="{\"state\":\"idle\"}";
- private volatile String diagnosticExport;
 
  LocalGameServer(Context c)throws IOException{
   context=c.getApplicationContext();
@@ -80,14 +75,14 @@ final class LocalGameServer {
    InputStream in=new BufferedInputStream(s.getInputStream());
    String[] request=line(in).split(" ");
    if(request.length<2)return;
-   HttpMeta meta=readHeaders(in);
-   if(meta.length>MAX_BODY)throw new IOException("Body too large: "+meta.length);
+   int length=readHeaders(in);
+   if(length<0||length>MAX_BODY)throw new IOException("Body too large: "+length);
    String path=URLDecoder.decode(request[1].split("\\?")[0],"UTF-8");
    if(path.contains("..")||path.indexOf('\0')>=0){reply(s,403,"application/json","{\"state\":\"error\",\"message\":\"Invalid path\"}".getBytes(StandardCharsets.UTF_8));return;}
    byte[] data;String type="application/json";
 
    if(request[0].equals("POST")&&path.equals("/complication-state")){
-    data=readBody(in,meta);
+    data=in.readNBytes(length);if(data.length!=length)throw new IOException("Incomplete complication body");
     ComplicationStore.saveSnapshot(context,new String(data,StandardCharsets.UTF_8));
     data="{\"ok\":true}".getBytes(StandardCharsets.UTF_8);
    }else if(request[0].equals("POST")&&path.equals("/open-complication-settings")){
@@ -95,24 +90,10 @@ final class LocalGameServer {
     context.startActivity(intent);
     data="{\"ok\":true}".getBytes(StandardCharsets.UTF_8);
    }else if(request[0].equals("POST")&&(path.equals("/backup")||path.equals("/save-manual"))){
-    byte[] body=readBody(in,meta);
+    byte[] body=in.readNBytes(length);if(body.length!=length)throw new IOException("Incomplete save body");
     data=(path.equals("/save-manual")?manualSave(body):internalSave(body)).getBytes(StandardCharsets.UTF_8);
-   }else if(request[0].equals("POST")&&path.equals("/diagnostic/report")){
-    byte[] body=readBody(in,meta);
-    String report=new String(body,StandardCharsets.UTF_8);new org.json.JSONObject(report);diagnosticReport=report;
-    data="{\"state\":\"success\"}".getBytes(StandardCharsets.UTF_8);
-   }else if(request[0].equals("POST")&&path.equals("/diagnostic/snapshot")){
-    byte[] body=readBody(in,meta);
-    org.json.JSONObject parsed=new org.json.JSONObject(new String(body,StandardCharsets.UTF_8));
-    diagnosticExport=parsed.getString("exportText");
-    data=("{\"state\":\"success\",\"characters\":"+diagnosticExport.length()+",\"sha256\":\""+sha256(diagnosticExport)+"\"}").getBytes(StandardCharsets.UTF_8);
-   }else if(path.equals("/diagnostic/status")){
-    data=diagnosticReport.getBytes(StandardCharsets.UTF_8);
-   }else if(request[0].equals("POST")&&path.equals("/diagnostic/start-transfer")){
-    if(diagnosticExport==null)throw new IllegalStateException("No verified diagnostic snapshot is available.");
-    data=startTransfer(diagnosticExport).getBytes(StandardCharsets.UTF_8);
    }else if(request[0].equals("POST")&&path.equals("/transfer/start")){
-    byte[] body=readBody(in,meta);
+    byte[] body=in.readNBytes(length);if(body.length!=length)throw new IOException("Incomplete transfer body");
     org.json.JSONObject parsed=new org.json.JSONObject(new String(body,StandardCharsets.UTF_8));
     data=startTransfer(parsed.getString("exportText")).getBytes(StandardCharsets.UTF_8);
    }else if(path.equals("/transfer/status")){
@@ -123,17 +104,17 @@ final class LocalGameServer {
    }else if(path.equals("/transfer/import-text")){
     data=getPendingImport().getBytes(StandardCharsets.UTF_8);
    }else if(request[0].equals("POST")&&path.equals("/transfer/clear-import")){
-    pendingImport=null;pendingImportSha=null;
+    pendingImport=null;
     data="{\"state\":\"success\"}".getBytes(StandardCharsets.UTF_8);
    }else if(request[0].equals("POST")&&path.equals("/transfer/stop")){
     stopTransfer();
     data="{\"state\":\"success\"}".getBytes(StandardCharsets.UTF_8);
    }else if(request[0].equals("POST")&&path.equals("/export")){
-    byte[] body=readBody(in,meta);
+    byte[] body=in.readNBytes(length);if(body.length!=length)throw new IOException("Incomplete export body");
     org.json.JSONObject parsed=new org.json.JSONObject(new String(body,StandardCharsets.UTF_8));
     data=copyClipboard(parsed.getString("exportText")).getBytes(StandardCharsets.UTF_8);
    }else if(request[0].equals("POST")&&path.equals("/clipboard-copy")){
-    byte[] body=readBody(in,meta);
+    byte[] body=in.readNBytes(length);if(body.length!=length)throw new IOException("Incomplete clipboard body");
     org.json.JSONObject parsed=new org.json.JSONObject(new String(body,StandardCharsets.UTF_8));
     data=copyClipboard(parsed.getString("text")).getBytes(StandardCharsets.UTF_8);
    }else if(path.equals("/clipboard-read")){
@@ -153,37 +134,13 @@ final class LocalGameServer {
   }
  }
 
- private static final class HttpMeta{int length=-1;boolean chunked=false;}
- private HttpMeta readHeaders(InputStream in)throws IOException{
-  HttpMeta m=new HttpMeta();String h;
+ private int readHeaders(InputStream in)throws IOException{
+  int length=0;String h;
   while(!(h=line(in)).isEmpty()){
    String lower=h.toLowerCase(Locale.ROOT);
-   if(lower.startsWith("content-length:"))m.length=Integer.parseInt(h.substring(15).trim());
-   else if(lower.startsWith("transfer-encoding:")&&lower.contains("chunked"))m.chunked=true;
+   if(lower.startsWith("content-length:"))length=Integer.parseInt(h.substring(15).trim());
   }
-  return m;
- }
- private byte[] readBody(InputStream in,HttpMeta m)throws IOException{
-  if(m.chunked)return readChunked(in);
-  if(m.length<0)return new byte[0];
-  if(m.length>MAX_BODY)throw new IOException("Body too large: "+m.length);
-  byte[] body=in.readNBytes(m.length);
-  if(body.length!=m.length)throw new EOFException("Request body ended early: expected "+m.length+" bytes, got "+body.length);
-  return body;
- }
- private byte[] readChunked(InputStream in)throws IOException{
-  ByteArrayOutputStream out=new ByteArrayOutputStream();
-  while(true){
-   String sizeLine=line(in).trim();if(sizeLine.isEmpty())continue;
-   int semi=sizeLine.indexOf(';');if(semi>=0)sizeLine=sizeLine.substring(0,semi);
-   int size;try{size=Integer.parseInt(sizeLine.trim(),16);}catch(NumberFormatException e){throw new IOException("Invalid chunk size: "+sizeLine,e);}
-   if(size<0||out.size()+size>MAX_BODY)throw new IOException("Chunked body exceeds "+MAX_BODY+" bytes");
-   if(size==0){while(!line(in).isEmpty()){}break;}
-   byte[] chunk=in.readNBytes(size);if(chunk.length!=size)throw new EOFException("Chunk ended early");
-   out.write(chunk);
-   String terminator=line(in);if(!terminator.isEmpty())throw new IOException("Invalid chunk terminator");
-  }
-  return out.toByteArray();
+  return length;
  }
 
  private synchronized String startTransfer(String exportText){
@@ -194,9 +151,7 @@ final class LocalGameServer {
    if(addresses.isEmpty())throw new IllegalStateException("No reachable Wi-Fi/LAN IPv4 address was found. Connect the watch to the same Wi-Fi as your phone, or connect the watch to your phone hotspot.");
    transferToken=randomToken();
    transferExport=exportText;
-   transferExportSha=sha256(exportText);
    pendingImport=null;
-   pendingImportSha=null;
    pendingImportId=0;
    transferExpires=System.currentTimeMillis()+TRANSFER_TTL_MS;
    transferSocket=new ServerSocket();
@@ -225,7 +180,7 @@ final class LocalGameServer {
     urls.append("\"http://").append(esc(addresses.get(i))).append(':').append(TRANSFER_PORT).append("/t/").append(transferToken).append("/\"");
    }
    urls.append(']');
-   return "{\"state\":\"success\",\"url\":\""+esc(transferUrl)+"\",\"urls\":"+urls+",\"expiresSeconds\":"+(TRANSFER_TTL_MS/1000)+",\"characters\":"+transferExport.length()+",\"sha256\":\""+transferExportSha+"\"}";
+   return "{\"state\":\"success\",\"url\":\""+esc(transferUrl)+"\",\"urls\":"+urls+",\"expiresSeconds\":"+(TRANSFER_TTL_MS/1000)+"}";
   }catch(Throwable e){
    stopTransfer();
    return errorJson("transfer-start",e,"A temporary LAN server could not be started.");
@@ -237,11 +192,9 @@ final class LocalGameServer {
   transferSocket=null;
   transferToken=null;
   transferExport=null;
-  transferExportSha=null;
   transferUrl=null;
   transferExpires=0;
   pendingImport=null;
-  pendingImportSha=null;
   pendingImportId=0;
   if(s!=null)try{s.close();}catch(IOException ignored){}
  }
@@ -254,7 +207,7 @@ final class LocalGameServer {
   }
   String p=pendingImport;
   long remaining=Math.max(0,(transferExpires-System.currentTimeMillis()+999)/1000);
-  return "{\"state\":\"success\",\"active\":true,\"url\":\""+esc(transferUrl)+"\",\"remainingSeconds\":"+remaining+",\"exportSha256\":\""+esc(transferExportSha)+"\",\"pending\":"+(p!=null)+",\"pendingCharacters\":"+(p==null?0:p.length())+",\"pendingSha256\":\""+esc(pendingImportSha)+"\",\"pendingId\":"+pendingImportId+"}";
+  return "{\"state\":\"success\",\"active\":true,\"url\":\""+esc(transferUrl)+"\",\"remainingSeconds\":"+remaining+",\"pending\":"+(p!=null)+",\"pendingCharacters\":"+(p==null?0:p.length())+",\"pendingId\":"+pendingImportId+"}";
  }
 
  private byte[] transferQr()throws Exception{
@@ -274,7 +227,7 @@ final class LocalGameServer {
  private String getPendingImport(){
   String p=pendingImport;
   if(p==null)return "{\"state\":\"empty\"}";
-  return "{\"state\":\"success\",\"id\":"+pendingImportId+",\"characters\":"+p.length()+",\"sha256\":\""+esc(pendingImportSha)+"\",\"text\":\""+esc(p)+"\"}";
+  return "{\"state\":\"success\",\"id\":"+pendingImportId+",\"characters\":"+p.length()+",\"text\":\""+esc(p)+"\"}";
  }
 
  private void serveTransfer(Socket socket){
@@ -283,8 +236,8 @@ final class LocalGameServer {
    InputStream in=new BufferedInputStream(s.getInputStream());
    String[] request=line(in).split(" ");
    if(request.length<2)return;
-   HttpMeta meta=readHeaders(in);
-   if(meta.length>MAX_BODY){reply(s,413,"text/plain","Save is too large.".getBytes(StandardCharsets.UTF_8));return;}
+   int length=readHeaders(in);
+   if(length<0||length>MAX_BODY){reply(s,413,"text/plain","Save is too large.".getBytes(StandardCharsets.UTF_8));return;}
 
    String rawPath=request[1].split("\\?")[0];
    String token=transferToken;
@@ -303,16 +256,15 @@ final class LocalGameServer {
     headers.put("Content-Disposition","attachment; filename=\""+filename+"\"");
     reply(s,200,"text/plain",save.getBytes(StandardCharsets.UTF_8),headers);
    }else if(request[0].equals("POST")&&action.equals("import")){
-    byte[] body=readBody(in,meta);
+    byte[] body=in.readNBytes(length);
+    if(body.length!=length)throw new IOException("Import upload was incomplete.");
     String text=new String(body,StandardCharsets.UTF_8).trim();
     if(text.isEmpty())throw new IOException("Uploaded save is empty.");
-    String incomingSha=sha256(text);
     synchronized(this){
      pendingImport=text;
-     pendingImportSha=incomingSha;
      pendingImportId++;
     }
-    reply(s,200,"application/json",("{\"state\":\"success\",\"characters\":"+text.length()+",\"sha256\":\""+incomingSha+"\",\"id\":"+pendingImportId+"}").getBytes(StandardCharsets.UTF_8));
+    reply(s,200,"application/json",("{\"state\":\"success\",\"characters\":"+text.length()+",\"id\":"+pendingImportId+"}").getBytes(StandardCharsets.UTF_8));
    }else{
     reply(s,404,"text/plain","Not found".getBytes(StandardCharsets.UTF_8));
    }
@@ -324,7 +276,7 @@ final class LocalGameServer {
  private String transferPage(){
   return "<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Kittens Wear Transfer</title>"
    +"<style>body{font-family:system-ui,sans-serif;max-width:680px;margin:auto;padding:22px;background:#161616;color:#eee}h1{font-size:1.5rem}section{background:#242424;padding:18px;margin:14px 0;border-radius:14px}button,a.dl{display:block;box-sizing:border-box;width:100%;padding:14px;margin:10px 0;border:0;border-radius:10px;background:#ddd;color:#111;text-align:center;font-weight:700;text-decoration:none}textarea{box-sizing:border-box;width:100%;min-height:150px;padding:10px;border-radius:8px}input{width:100%;margin:10px 0}#status{white-space:pre-wrap}</style></head><body>"
-   +"<h1>Kittens Wear transfer</h1><p>Direct local transfer with your watch. This page stops working when the watch transfer session expires.</p><p><b>Watch save:</b> "+transferExport.length()+" characters<br><b>SHA-256:</b> <code>"+html(transferExportSha)+"</code></p>"
+   +"<h1>Kittens Wear transfer</h1><p>Direct local transfer with your watch. This page stops working when the watch transfer session expires.</p>"
    +"<section><h2>Export from watch</h2><a class=\"dl\" href=\"download\">Download current save</a></section>"
    +"<section><h2>Import to watch</h2><p>Select a Kittens Game save file, or paste a web export below.</p>"
    +"<input id=\"file\" type=\"file\" accept=\".txt,text/plain,application/json\"><textarea id=\"text\" placeholder=\"Or paste save text here…\"></textarea>"
@@ -333,14 +285,6 @@ final class LocalGameServer {
    +"f.onchange=async()=>{if(f.files[0]){t.value=await f.files[0].text();s.textContent='Loaded '+t.value.length+' characters.'}};"
    +"document.getElementById('send').onclick=async()=>{const v=t.value.trim();if(!v){s.textContent='Choose a file or paste a save first.';return}try{s.textContent='Sending…';const r=await fetch('import',{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:v});const x=await r.json();if(!r.ok||x.state!=='success')throw new Error(x.message||'Transfer failed');s.textContent='Sent '+x.characters+' characters. Return to the watch and tap Apply received import.'}catch(e){s.textContent='Transfer failed: '+e.message}};</script>"
    +"</body></html>";
- }
-
- private static String sha256(String text)throws Exception{
-  MessageDigest d=MessageDigest.getInstance("SHA-256");
-  byte[] hash=d.digest(text.getBytes(StandardCharsets.UTF_8));
-  StringBuilder out=new StringBuilder(hash.length*2);
-  for(byte b:hash)out.append(String.format(Locale.US,"%02x",b&0xff));
-  return out.toString();
  }
 
  private static String randomToken(){
