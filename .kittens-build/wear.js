@@ -1,7 +1,7 @@
 (function(){
  'use strict';
  const KEY='com.nuclearunicorn.kittengame.savedata';
- let ready=false, suspended=false, lastTabList='', page='play', lastComplicationSync=0, transferPoll=0;
+ let ready=false, suspended=false, lastTabList='', page='play', lastComplicationSync=0;
  const $id=id=>document.getElementById(id);
  function node(tag,attrs,text){let n=document.createElement(tag);Object.assign(n,attrs||{});if(text!==undefined)n.textContent=text;return n;}
  function button(text,fn,parent){let b=node('button',{type:'button',className:'wear-button'},text);b.onclick=fn;parent.appendChild(b);return b;}
@@ -19,121 +19,6 @@
  function wearEsc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
  async function waitNative(url){for(;;){await new Promise(r=>setTimeout(r,500));const q=await fetch(url,{cache:'no-store'});let x;try{x=await q.json();}catch(e){throw new Error('Native operation returned invalid JSON: '+e.message);}if(x.state!=='waiting')return x;}}
  function opError(title,x){detail('<h2>'+wearEsc(title)+'</h2><p><b>Operation:</b> '+wearEsc(x.operation||'unknown')+'</p><p><b>Error type:</b> '+wearEsc(x.type||'unknown')+'</p><p><b>Message:</b> '+wearEsc(x.message||'No message')+'</p>'+(x.cause?'<p><b>Cause:</b> '+wearEsc(x.cause)+'</p>':'')+(x.detail?'<p><b>Details:</b> '+wearEsc(x.detail)+'</p>':''));}
- function captureSaveData(){
-  const gp=window.gamePage||window.game;
-  if(!gp)throw new Error('GamePage instance is unavailable.');
-  if(typeof gp.save==='function')return gp.save();
-  let proto=Object.getPrototypeOf(gp);
-  while(proto){
-   const d=Object.getOwnPropertyDescriptor(proto,'save');
-   if(d&&typeof d.value==='function')return d.value.call(gp);
-   proto=Object.getPrototypeOf(proto);
-  }
-  const raw=LCstorage[KEY];
-  if(!raw)throw new Error('No callable save serializer and no existing local save were found.');
-  const json=raw[0]==='{'?raw:gp.decompressLZData(raw);
-  if(!json||json[0]!=='{')throw new Error('Existing local save could not be decoded.');
-  return JSON.parse(json);
- }
- function captureExportText(){
-  const gp=window.gamePage||window.game;
-  if(!gp||typeof gp.compressLZData!=='function')throw new Error('Kittens Game compression API is unavailable.');
-  return gp.compressLZData(JSON.stringify(captureSaveData()));
- }
- function saveApiDiagnostic(){
-  const gp=window.gamePage||null,g=window.game||null;
-  return 'typeof game.save='+(g?typeof g.save:'no-game')+', typeof gamePage.save='+(gp?typeof gp.save:'no-gamePage');
- }
- function stopTransferPoll(){if(transferPoll){clearInterval(transferPoll);transferPoll=0;}}
- async function safetyBackup(){
-  const r=await fetch('/save-manual',{method:'POST',body:JSON.stringify(captureSaveData()),keepalive:true});
-  let x;try{x=await r.json();}catch(e){throw new Error('Safety backup returned invalid JSON: '+e.message);}
-  if(!r.ok||x.state==='error')throw Object.assign(new Error(x.message||'Safety backup failed'),{details:x});
-  return x;
- }
- async function showTransferSave(){
-  stopTransferPoll();
-  try{
-   const exportText=captureExportText();
-   const r=await fetch('/transfer/start',{method:'POST',body:JSON.stringify({exportText})});
-   const x=await r.json();
-   if(!r.ok||x.state!=='success'){opError('Transfer could not start',x);return;}
-   const box=node('div');
-   box.append(node('h2',{},'Transfer save'));
-   const qr=node('img',{src:'/transfer/qr?'+Date.now(),alt:'QR code for transfer page'});
-   qr.style.width='180px';qr.style.height='180px';qr.style.display='block';qr.style.margin='8px auto';qr.style.background='#fff';qr.style.borderRadius='8px';
-   box.append(qr);
-   box.append(node('p',{},'On your Fairphone, scan this QR code while both devices are on the same Wi-Fi. You can also connect the watch to your Fairphone hotspot.'));
-   const url=node('textarea',{readOnly:true,rows:3,value:x.url});url.style.width='100%';url.style.boxSizing='border-box';url.style.fontSize='11px';url.onclick=()=>{url.focus();url.select();};box.append(url);
-   if(Array.isArray(x.urls)&&x.urls.length>1){
-    const alt=node('details');alt.append(node('summary',{},'Alternative addresses'));
-    x.urls.slice(1).forEach(u=>alt.append(node('p',{},u)));box.append(alt);
-   }
-   const state=node('p',{id:'wearTransferState'},'Transfer server running for 15 minutes.');box.append(state);
-   const apply=button('Apply received import',async()=>{
-    try{
-     apply.disabled=true;
-     const ir=await fetch('/transfer/import-text',{cache:'no-store'}), incoming=await ir.json();
-     if(incoming.state!=='success')throw new Error('No received save is waiting.');
-     if(!confirm('Replace your current village with the save received from your phone?')){apply.disabled=false;return;}
-     state.textContent='Creating safety backup…';
-     const backup=await safetyBackup();
-     state.textContent='Validating and importing received save…';
-     await importSave(incoming.text);
-     await fetch('/transfer/clear-import',{method:'POST'});
-     state.textContent='Import complete. Previous village backed up as '+(backup.fileName||'a timestamped save')+'.';
-     apply.hidden=true;
-     status('Imported save from phone');
-    }catch(e){
-     apply.disabled=false;
-     const x=e.details||{operation:'LAN import',type:e.name||'ImportError',message:e.message||String(e),detail:'The incoming save was not applied. Your existing village remains available.'};
-     opError('Received import failed',x);
-    }
-   },box);
-   apply.hidden=true;
-   button('Stop transfer',async()=>{
-    stopTransferPoll();
-    try{await fetch('/transfer/stop',{method:'POST'});}catch(e){}
-    state.textContent='Transfer stopped.';
-    apply.hidden=true;
-    status('Transfer stopped');
-   },box);
-   box.append(node('p',{},'The phone page can download the current save or send a .txt/web save back to the watch. A received import is not applied until you approve it here.'));
-   $id('wearDetailBody').replaceChildren(box);$id('wearDetail').hidden=false;$id('wearDetail').scrollTop=0;
-   const poll=async()=>{
-    const el=$id('wearTransferState');if(!el){stopTransferPoll();return;}
-    try{
-     const sr=await fetch('/transfer/status',{cache:'no-store'}), st=await sr.json();
-     if(!st.active){el.textContent='Transfer session ended or expired.';apply.hidden=true;stopTransferPoll();return;}
-     const mins=Math.floor(st.remainingSeconds/60),secs=st.remainingSeconds%60;
-     if(st.pending){
-      el.textContent='Save received from phone · '+st.pendingCharacters+' characters · '+mins+':'+String(secs).padStart(2,'0')+' remaining';
-      apply.hidden=false;
-     }else{
-      el.textContent='Waiting for phone · '+mins+':'+String(secs).padStart(2,'0')+' remaining';
-      apply.hidden=true;
-     }
-    }catch(e){el.textContent='Could not read transfer status: '+e.message;}
-   };
-   await poll();transferPoll=setInterval(poll,1000);
-  }catch(e){
-   opError('Transfer failed',{operation:'transfer-start',type:e.name||'TransferError',message:e.message||String(e),detail:'Transfer setup failed before or while starting the LAN server. '+saveApiDiagnostic()+' If a URL was never shown, this is not a phone/Wi-Fi reachability error.'});
-  }
- }
- function showAdvanced(){
-  const box=node('div');box.append(node('h2',{},'Advanced / fallback'),node('p',{},'Clipboard transfer is kept as a fallback when LAN transfer is unavailable.'));
-  button('Export via clipboard',async()=>{
-   try{
-    const text=captureExportText();showExportBox(text);
-    const response=await fetch('/export',{method:'POST',body:JSON.stringify({exportText:text})});
-    const x=await response.json();const msg=$id('wearExportStatus');
-    if(x.state==='success'){msg.textContent='Copied to Android clipboard · '+x.characters+' characters';status('Save copied to clipboard');}
-    else msg.textContent='Automatic clipboard copy failed. Long-press the box and copy manually.';
-   }catch(e){opError('Clipboard export failed',{operation:'clipboard-export',type:e.name,message:e.message,detail:'The save could not be copied automatically.'});}
-  },box);
-  button('Import via clipboard',()=>showImportBox(),box);
-  $id('wearDetailBody').replaceChildren(box);$id('wearDetail').hidden=false;$id('wearDetail').scrollTop=0;
- }
  function showExportBox(text){
   const box=node('div');box.append(node('h2',{},'Export save'));
   box.append(node('p',{id:'wearExportStatus'},'Preparing Android clipboard…'));
@@ -155,15 +40,15 @@
   $id('wearDetailBody').replaceChildren(box);$id('wearDetail').hidden=false;$id('wearDetail').scrollTop=0;setTimeout(()=>area.focus(),100);
  }
  button('Save now',async()=>{await save(true);},settings);
- button('Transfer save',()=>showTransferSave(),settings);
- button('Advanced / fallback',()=>showAdvanced(),settings);
+ button('Export save',async()=>{try{const text=game.compressLZData(JSON.stringify(game.save()));showExportBox(text);const response=await fetch('/export',{method:'POST',body:JSON.stringify({exportText:text})});let x;try{x=await response.json();}catch(e){x={state:'error',operation:'clipboard-copy',type:e.name,message:e.message,detail:'The export string is still visible below for manual copying.'};}const msg=$id('wearExportStatus');if(x.state==='success'){msg.textContent='Copied to Android clipboard · '+x.characters+' characters';status('Save copied to clipboard');}else{msg.textContent='Automatic clipboard copy failed. Long-press the box and copy manually.';msg.dataset.error=JSON.stringify(x);}}catch(e){opError('Export failed',{operation:'export',type:e.name,message:e.message,detail:'The game could not generate an export string.'});}},settings);
+ button('Import save',()=>showImportBox(),settings);
  button('Building filters',()=>{const list=node('div');list.append(node('h2',{},'Building filters'));game.bld.getBuildingGroups(true).forEach(group=>button(group.title,()=>{game.bldTab.activeGroup=group.name;game.render();$id('wearDetail').hidden=true;go('play');},list));$id('wearDetailBody').replaceChildren(list);$id('wearDetail').hidden=false;},settings);
  button('Game options',()=>{$('#optionsDiv').show();game.ui.updateOptions();},settings);
  button('Pause / resume',()=>{game.togglePause();status(game.isPaused?'Game paused':'Game running');syncComplication(true);},settings);
  button('Complication resource',async()=>{try{const r=await fetch('/open-complication-settings',{method:'POST'});if(!r.ok)throw Error();}catch(e){status('Could not open complication settings');}},settings);
  button('Reset / prestige',()=>game.reset(),settings);
- settings.append(node('p',{},'Swipe up to scroll. Tap Details for costs and effects. Transfer save opens a temporary local web page for your phone. Your game saves every 10 seconds and when you leave. Offline progress follows the original game rules.'));
- button('About & credits',()=>detail('<h2>Kittens Wear 1.1.7</h2><p>Personal offline adaptation for Wear OS. Original game by bloodrizer and contributors.</p><p>Based on Kittens Game '+version+'. Bundles Mozilla GeckoView (MPL 2.0).</p><p>Original game: kittensgame.com/web/</p><p>Source: github.com/nuclear-unicorn/kittensgame</p><p>Game code retains its WET PAWS LICENSE; this build is for personal use.</p><p>Engine sources: archive.mozilla.org/pub/firefox/releases/140.0.4/source/</p><p>All original acknowledgements:</p>'+$id('creditsDiv').innerHTML),settings);
+ settings.append(node('p',{},'Swipe up to scroll. Tap Details for costs and effects. The bottom Menu button switches screens. Your game saves every 10 seconds and when you leave. Offline progress follows the original game rules.'));
+ button('About & credits',()=>detail('<h2>Kittens Wear 1.1.5</h2><p>Personal offline adaptation for Wear OS. Original game by bloodrizer and contributors.</p><p>Based on Kittens Game '+version+'. Bundles Mozilla GeckoView (MPL 2.0).</p><p>Original game: kittensgame.com/web/</p><p>Source: github.com/nuclear-unicorn/kittensgame</p><p>Game code retains its WET PAWS LICENSE; this build is for personal use.</p><p>Engine sources: archive.mozilla.org/pub/firefox/releases/140.0.4/source/</p><p>All original acknowledgements:</p>'+$id('creditsDiv').innerHTML),settings);
  const state=node('p',{id:'wearStatus'},'Starting your forest…');document.body.append(state);
  const menu=node('section',{id:'wearMenu',hidden:true});menu.append(node('h2',{},'Your village'),nav);button('Back to game',()=>menu.hidden=true,menu);document.body.append(menu);nav.addEventListener('click',()=>menu.hidden=true);const top=button('Menu',()=>{menu.hidden=false;menu.scrollTop=0;},document.body);top.id='wearHome';
  const sheet=node('section',{id:'wearDetail',hidden:true});sheet.append(node('div',{id:'wearDetailBody'}));button('Close',()=>sheet.hidden=true,sheet);document.body.append(sheet);
@@ -183,10 +68,10 @@
    });
   }
  }
- async function save(manual){if(!ready || game.currentSaveIsBroken){if(manual)opError('Save failed',{operation:'save',type:'GameStateError',message:'The game is not ready to save or reports the current save as broken.',detail:'No new save file was created.'});return;}try{let data=captureSaveData();const endpoint=manual?'/save-manual':'/backup';const r=await fetch(endpoint,{method:'POST',body:JSON.stringify(data),keepalive:true});let x;try{x=await r.json();}catch(e){throw new Error('Save service returned invalid JSON: '+e.message);}if(!r.ok||x.state==='error'){if(manual)opError('Save failed',x);return;}if(manual){let msg='<h2>Save complete</h2><p><b>'+wearEsc(x.fileName||'KittensGame save')+'</b></p><p>Location: <b>'+wearEsc(x.location||'internal storage')+'</b></p><p>Internal recovery copy: <b>'+(x.internal?'OK':'FAILED')+'</b><br>Visible timestamped copy: <b>'+(x.visible?'OK':'FAILED')+'</b></p>';if(x.detail)msg+='<p><b>Warnings:</b> '+wearEsc(x.detail)+'</p>';detail(msg);}}catch(e){if(manual)opError('Save failed',{operation:'save',type:e.name,message:e.message,detail:'The request to the native save service failed.'});}}
+ async function save(manual){if(!ready || game.currentSaveIsBroken){if(manual)opError('Save failed',{operation:'save',type:'GameStateError',message:'The game is not ready to save or reports the current save as broken.',detail:'No new save file was created.'});return;}try{let data=game.save();const endpoint=manual?'/save-manual':'/backup';const r=await fetch(endpoint,{method:'POST',body:JSON.stringify(data),keepalive:true});let x;try{x=await r.json();}catch(e){throw new Error('Save service returned invalid JSON: '+e.message);}if(!r.ok||x.state==='error'){if(manual)opError('Save failed',x);return;}if(manual){let msg='<h2>Save complete</h2><p><b>'+wearEsc(x.fileName||'KittensGame save')+'</b></p><p>Location: <b>'+wearEsc(x.location||'internal storage')+'</b></p><p>Internal recovery copy: <b>'+(x.internal?'OK':'FAILED')+'</b><br>Visible timestamped copy: <b>'+(x.visible?'OK':'FAILED')+'</b></p>';if(x.detail)msg+='<p><b>Warnings:</b> '+wearEsc(x.detail)+'</p>';detail(msg);}}catch(e){if(manual)opError('Save failed',{operation:'save',type:e.name,message:e.message,detail:'The request to the native save service failed.'});}}
  async function importSave(text){
   text=text.trim();const parsed=JSON.parse(text.startsWith('{')?text:game.decompressLZData(text));text=game.compressLZData(JSON.stringify(parsed));if(!parsed || !Array.isArray(parsed.resources) || !parsed.game)throw Error('Not a Kittens Game save');const previous=LCstorage[KEY];
-  return new Promise((resolve,reject)=>game.saveImportText(text,error=>{if(error){LCstorage[KEY]=previous;game.load();game.render();reject(error);}else{game.opts.enableRedshift=true;game.opts.useWorkers=false;save(false);go('play');resolve();}}));
+  return new Promise((resolve,reject)=>game.saveImportText(text,error=>{if(error){LCstorage[KEY]=previous;game.load();game.render();reject(error);}else{game.opts.enableRedshift=true;game.opts.useWorkers=false;save(true);go('play');resolve();}}));
  }
  function installDetails(){
   com.nuclearunicorn.game.ui.ContentRowRenderer.prototype.initRenderer=function(content){this.content=content;this.twoRows=false;};
@@ -231,6 +116,6 @@
   if(document.hidden){syncComplication(true);save(false);clearInterval(game._mainTimer);game._mainTimer=null;suspended=true;}
   else if(suspended){suspended=false;if(!game.isPaused)game.time.calculateRedshift();game.start();update();syncComplication(true);}
  });
- window.addEventListener('pagehide',()=>{if(ready){try{captureSaveData();}catch(e){console.error('Page-exit save failed',e,saveApiDiagnostic());}}});
+ window.addEventListener('pagehide',()=>{if(ready)game.save();});
  document.body.dataset.page='play';
 })();
