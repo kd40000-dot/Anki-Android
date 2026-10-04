@@ -105,7 +105,7 @@ jobs:
           profile: wearos_small_round
           disable-animations: true
           script: |
-            set -euo pipefail
+            set -eu
             adb install -r wear-kittens/app/build/outputs/apk/debug/app-debug.apk
             adb shell am force-stop com.balthazar.kittenswear || true
             adb shell am start -W -n com.balthazar.kittenswear/.MainActivity
