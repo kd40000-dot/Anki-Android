@@ -202,7 +202,7 @@ final class LocalGameServer {
   }
  }
  private static String randomToken(){
-  byte[] b=new byte[24];new SecureRandom().nextBytes(b);
+  byte[] b=new byte[8];new SecureRandom().nextBytes(b);
   StringBuilder s=new StringBuilder();
   for(byte x:b)s.append(String.format(Locale.US,"%02x",x&0xff));
   return s.toString();
