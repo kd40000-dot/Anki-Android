@@ -81,6 +81,14 @@ jobs:
           test -f app/build/outputs/apk/release/app-release.apk
           cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/Kittens-WearOS5-1.1.8.apk"
 
+      - name: Upload APK for physical-device testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kittens-WearOS5-1.1.8
+          path: Kittens-WearOS5-1.1.8.apk
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Build x86_64 smoke-test APK
         shell: bash
         working-directory: wear-kittens
@@ -105,11 +113,3 @@ jobs:
           profile: wearos_small_round
           disable-animations: true
           script: bash .kittens-build/smoke-test.sh
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Kittens-WearOS5-1.1.8
-          path: Kittens-WearOS5-1.1.8.apk
-          if-no-files-found: error
-          retention-days: 7
