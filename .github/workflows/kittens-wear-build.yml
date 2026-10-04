@@ -1,4 +1,4 @@
-name: Build Kittens Wear 1.1.7
+name: Build Kittens Wear 1.1.8
 
 on:
   push:
@@ -68,23 +68,104 @@ jobs:
 
           cp .kittens-build/wear.js wear-kittens/app/src/main/assets/game/wear.js
 
-          keytool -genkeypair -v             -keystore wear-kittens/personal.jks             -storepass kittenswear-1.1.7             -keypass kittenswear-1.1.7             -alias kittens             -keyalg RSA -keysize 2048 -validity 36500             -dname "CN=Kittens Wear Personal Build, O=Personal, C=ES"
+          keytool -genkeypair -v             -keystore wear-kittens/personal.jks             -storepass kittenswear-1.1.8             -keypass kittenswear-1.1.8             -alias kittens             -keyalg RSA -keysize 2048 -validity 36500             -dname "CN=Kittens Wear Personal Build, O=Personal, C=ES"
 
       - name: Build signed release APK
         shell: bash
         working-directory: wear-kittens
         env:
-          KITTENS_KEYSTORE_PASSWORD: kittenswear-1.1.7
+          KITTENS_KEYSTORE_PASSWORD: kittenswear-1.1.8
         run: |
           set -euo pipefail
           gradle :app:assembleRelease --no-daemon --stacktrace
           test -f app/build/outputs/apk/release/app-release.apk
-          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/Kittens-WearOS5-1.1.7.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/Kittens-WearOS5-1.1.8.apk"
+
+      - name: Build x86_64 smoke-test APK
+        shell: bash
+        working-directory: wear-kittens
+        run: |
+          set -euo pipefail
+          gradle :app:assembleDebug -PemulatorBuild --no-daemon --stacktrace
+          test -f app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Enable KVM
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Runtime save-transfer smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: android-wear
+          arch: x86_64
+          profile: wearos_small_round
+          disable-animations: true
+          script: |
+            set -euo pipefail
+            adb install -r wear-kittens/app/build/outputs/apk/debug/app-debug.apk
+            adb shell am force-stop com.balthazar.kittenswear || true
+            adb shell am start -W -n com.balthazar.kittenswear/.MainActivity
+            adb forward tcp:18742 tcp:18742
+            ok=0
+            for i in $(seq 1 120); do
+              if curl -fsS http://127.0.0.1:18742/diagnostic/status -o /tmp/diag.json; then
+                cat /tmp/diag.json
+                state=$(python3 -c 'import json; print(json.load(open("/tmp/diag.json")).get("state",""))' 2>/dev/null || true)
+                if [ "$state" = success ]; then ok=1; break; fi
+                if [ "$state" = error ]; then echo "Runtime self-test failed"; exit 1; fi
+              fi
+              sleep 1
+            done
+            test "$ok" = 1
+
+            curl -fsS -X POST http://127.0.0.1:18742/diagnostic/start-transfer -o /tmp/start.json
+            cat /tmp/start.json
+            python3 - <<'PY'
+            import json
+            x=json.load(open('/tmp/start.json'))
+            assert x.get('state')=='success', x
+            assert x.get('sha256') and len(x['sha256'])==64, x
+            assert x.get('characters',0)>20, x
+            open('/tmp/path','w').write('/'+x['url'].split('/',3)[3])
+            open('/tmp/sha','w').write(x['sha256'])
+            PY
+
+            adb forward tcp:18743 tcp:18743
+            path=$(cat /tmp/path)
+            curl -fsS "http://127.0.0.1:18743${path}" -o /tmp/page.html
+            grep -q "Kittens Wear transfer" /tmp/page.html
+            curl -fsS "http://127.0.0.1:18743${path}download" -o /tmp/save.txt
+            test -s /tmp/save.txt
+            printf '%s  %s
+' "$(cat /tmp/sha)" /tmp/save.txt | sha256sum -c -
+
+            curl -fsS -X POST -H 'Content-Type: text/plain;charset=utf-8' --data-binary @/tmp/save.txt "http://127.0.0.1:18743${path}import" -o /tmp/import.json
+            cat /tmp/import.json
+            python3 - <<'PY'
+            import json
+            imp=json.load(open('/tmp/import.json'))
+            assert imp.get('state')=='success', imp
+            assert imp.get('sha256')==open('/tmp/sha').read().strip(), imp
+            PY
+
+            curl -fsS http://127.0.0.1:18742/transfer/status -o /tmp/status.json
+            cat /tmp/status.json
+            python3 - <<'PY'
+            import json
+            x=json.load(open('/tmp/status.json'))
+            assert x.get('active') is True, x
+            assert x.get('pending') is True, x
+            assert x.get('pendingSha256')==open('/tmp/sha').read().strip(), x
+            PY
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Kittens-WearOS5-1.1.7
-          path: Kittens-WearOS5-1.1.7.apk
+          name: Kittens-WearOS5-1.1.8
+          path: Kittens-WearOS5-1.1.8.apk
           if-no-files-found: error
           retention-days: 7
