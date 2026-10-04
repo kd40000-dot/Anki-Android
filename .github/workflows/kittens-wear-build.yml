@@ -1,4 +1,4 @@
-name: Build Kittens Wear 1.1.7
+name: Build Kittens Wear 1.1.5
 
 on:
   push:
@@ -68,23 +68,23 @@ jobs:
 
           cp .kittens-build/wear.js wear-kittens/app/src/main/assets/game/wear.js
 
-          keytool -genkeypair -v             -keystore wear-kittens/personal.jks             -storepass kittenswear-1.1.7             -keypass kittenswear-1.1.7             -alias kittens             -keyalg RSA -keysize 2048 -validity 36500             -dname "CN=Kittens Wear Personal Build, O=Personal, C=ES"
+          keytool -genkeypair -v             -keystore wear-kittens/personal.jks             -storepass kittenswear-1.1.5             -keypass kittenswear-1.1.5             -alias kittens             -keyalg RSA -keysize 2048 -validity 36500             -dname "CN=Kittens Wear Personal Build, O=Personal, C=ES"
 
       - name: Build signed release APK
         shell: bash
         working-directory: wear-kittens
         env:
-          KITTENS_KEYSTORE_PASSWORD: kittenswear-1.1.7
+          KITTENS_KEYSTORE_PASSWORD: kittenswear-1.1.5
         run: |
           set -euo pipefail
           gradle :app:assembleRelease --no-daemon --stacktrace
           test -f app/build/outputs/apk/release/app-release.apk
-          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/Kittens-WearOS5-1.1.7.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/Kittens-WearOS5-1.1.5.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Kittens-WearOS5-1.1.7
-          path: Kittens-WearOS5-1.1.7.apk
+          name: Kittens-WearOS5-1.1.5
+          path: Kittens-WearOS5-1.1.5.apk
           if-no-files-found: error
           retention-days: 7
