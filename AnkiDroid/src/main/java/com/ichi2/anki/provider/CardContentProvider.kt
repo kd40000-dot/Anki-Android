@@ -15,6 +15,7 @@ import android.database.Cursor
 import android.database.MatrixCursor
 import android.database.sqlite.SQLiteQueryBuilder
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.webkit.MimeTypeMap
 import androidx.core.net.toUri
 import anki.scheduler.CardAnswer
@@ -56,6 +57,7 @@ import org.json.JSONArray
 import org.json.JSONException
 import timber.log.Timber
 import java.io.File
+import java.io.FileNotFoundException
 import java.io.IOException
 
 /**
@@ -74,6 +76,7 @@ import java.io.IOException
  * * .../decks/# (access the specified deck)
  * * .../selected_deck (access the currently selected deck)
  * * .../media (add media files to anki collection.media)
+ * * .../media/* (read a media file from collection.media)
  * * .../cards (search for cards)
  * * .../cards/# (direct access to card)
  *
@@ -106,6 +109,7 @@ class CardContentProvider : ContentProvider() {
         private const val DECK_SELECTED = 4001
         private const val DECKS_ID = 4002
         private const val MEDIA = 5000
+        private const val MEDIA_FILE = 5001
         private const val CARDS = 6000
         private const val CARD_ID = 6001
         private val sUriMatcher = UriMatcher(UriMatcher.NO_MATCH)
@@ -159,6 +163,7 @@ class CardContentProvider : ContentProvider() {
             addUri("decks/#", DECKS_ID)
             addUri("selected_deck/", DECK_SELECTED)
             addUri("media", MEDIA)
+            addUri("media/*", MEDIA_FILE)
             addUri("cards", CARDS)
             addUri("cards/#", CARD_ID)
 
@@ -194,8 +199,41 @@ class CardContentProvider : ContentProvider() {
             DECKS, DECK_SELECTED, DECKS_ID -> FlashCardsContract.Deck.CONTENT_TYPE
             CARDS -> FlashCardsContract.Card.CONTENT_TYPE
             CARD_ID -> FlashCardsContract.Card.CONTENT_ITEM_TYPE
+            MEDIA_FILE -> {
+                val filename = uri.lastPathSegment.orEmpty()
+                val extension = filename.substringAfterLast('.', "").lowercase()
+                MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "application/octet-stream"
+            }
             else -> throw IllegalArgumentException("uri $uri is not supported")
         }
+    }
+
+    override fun openFile(
+        uri: Uri,
+        mode: String,
+    ): ParcelFileDescriptor {
+        if (!hasReadWritePermission()) {
+            throwSecurityException("openFile", uri)
+        }
+        if (sUriMatcher.match(uri) != MEDIA_FILE) {
+            throw FileNotFoundException("uri $uri is not a media file")
+        }
+        if (mode != "r") {
+            throw SecurityException("Anki media is exposed read-only")
+        }
+
+        val filename = uri.lastPathSegment ?: throw FileNotFoundException("Missing media filename")
+        if (filename.isBlank() || filename.contains('/') || filename.contains('\\')) {
+            throw FileNotFoundException("Invalid media filename")
+        }
+
+        val mediaDir = getColUnsafe().media.dir.canonicalFile
+        val mediaFile = File(mediaDir, filename).canonicalFile
+        if (mediaFile.parentFile != mediaDir || !mediaFile.isFile) {
+            throw FileNotFoundException("Media file not found: $filename")
+        }
+
+        return ParcelFileDescriptor.open(mediaFile, ParcelFileDescriptor.MODE_READ_ONLY)
     }
 
     /**
