@@ -76,7 +76,7 @@ import java.io.IOException
  * * .../decks/# (access the specified deck)
  * * .../selected_deck (access the currently selected deck)
  * * .../media (add media files to anki collection.media)
- * * .../media/* (read a media file from collection.media)
+ * * .../media/{filename} (read a media file from collection.media)
  * * .../cards (search for cards)
  * * .../cards/# (direct access to card)
  *
