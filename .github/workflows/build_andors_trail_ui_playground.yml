@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - chatgpt/andors-trail-anki-ui-playground
+  pull_request:
+    branches:
+      - chatgpt/andors-trail-anki-ui-playground
   workflow_dispatch:
 
 permissions:
