@@ -1,0 +1,1 @@
+Build validation trigger for submit-only Anki audio integration.
