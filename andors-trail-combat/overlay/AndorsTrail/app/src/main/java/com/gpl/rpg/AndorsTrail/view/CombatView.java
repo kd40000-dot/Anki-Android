@@ -6,6 +6,7 @@ import android.content.res.ColorStateList;
 import android.content.res.Resources;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.media.MediaPlayer;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
@@ -81,6 +82,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	private final Button ankiFlee;
 	private final Button ankiRecover;
 	private final AnkiCombatReviewClient ankiClient = new AnkiCombatReviewClient();
+	private MediaPlayer ankiAudioPlayer;
 	private final CombatController.AnkiCombatSession ankiSession;
 	private final Handler ankiMainHandler = new Handler(Looper.getMainLooper());
 	private boolean suppressAnkiTextWatcher = false;
@@ -488,6 +490,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	}
 
 	private void beginAnkiQuestion(AnkiCombatReviewClient.ReviewCard card) {
+		releaseAnkiAudio();
 		ankiSession.bypassForCurrentTurn = false;
 		ankiSession.card = card;
 		ankiSession.resetAttempt();
@@ -796,6 +799,53 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		button.setText(label);
 	}
 
+	private void releaseAnkiAudio() {
+		if (ankiAudioPlayer == null) return;
+		try {
+			ankiAudioPlayer.stop();
+		} catch (Exception ignored) {
+		}
+		try {
+			ankiAudioPlayer.release();
+		} catch (Exception ignored) {
+		}
+		ankiAudioPlayer = null;
+	}
+
+	private void playSubmittedAnswerAudio(AnkiCombatReviewClient.ReviewCard card) {
+		android.net.Uri audioUri = ankiClient.getAudioUri(card);
+		if (audioUri == null) return;
+
+		releaseAnkiAudio();
+		try {
+			MediaPlayer player = MediaPlayer.create(
+					getContext().getApplicationContext(),
+					audioUri);
+			if (player == null) return;
+
+			ankiAudioPlayer = player;
+			player.setOnCompletionListener((MediaPlayer finished) -> {
+				if (ankiAudioPlayer == finished) {
+					ankiAudioPlayer = null;
+				}
+				finished.release();
+			});
+			player.setOnErrorListener((MediaPlayer failed, int what, int extra) -> {
+				if (ankiAudioPlayer == failed) {
+					ankiAudioPlayer = null;
+				}
+				try {
+					failed.release();
+				} catch (Exception ignored) {
+				}
+				return true;
+			});
+			player.start();
+		} catch (Exception ignored) {
+			releaseAnkiAudio();
+		}
+	}
+
 	private void revealAnkiAnswer() {
 		if (ankiSession.phase != CombatController.AnkiCombatSession.Phase.QUESTION
 				|| ankiSession.card == null) return;
@@ -811,6 +861,10 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		ankiSession.errorMessage = "";
 		ankiSession.setPhase(CombatController.AnkiCombatSession.Phase.ANSWER);
 		syncAnkiUiFromSession(false);
+
+		// Pronunciation feedback only after the attempt is locked in. Never play
+		// audio while the English question is still being answered.
+		playSubmittedAnswerAudio(ankiSession.card);
 	}
 
 	private void setRatingButtonsEnabled(boolean enabled) {
@@ -1296,4 +1350,10 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	@Override
 	public void onActorConditionImmunityDurationChanged(Actor actor, ActorCondition condition) {
 	}
+	@Override
+	protected void onDetachedFromWindow() {
+		releaseAnkiAudio();
+		super.onDetachedFromWindow();
+	}
+
 }
