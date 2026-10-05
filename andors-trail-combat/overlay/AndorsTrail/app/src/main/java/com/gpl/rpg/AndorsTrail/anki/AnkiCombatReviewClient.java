@@ -28,15 +28,24 @@ public final class AnkiCombatReviewClient {
         public final int reps;
         public final String question;
         public final String answer;
+        public final String audioFileName;
         public final String[] nextIntervals;
         public long shownAtMs;
 
-        ReviewCard(long noteId, int cardOrd, int reps, String question, String answer, String[] nextIntervals) {
+        ReviewCard(
+                long noteId,
+                int cardOrd,
+                int reps,
+                String question,
+                String answer,
+                String audioFileName,
+                String[] nextIntervals) {
             this.noteId = noteId;
             this.cardOrd = cardOrd;
             this.reps = reps;
             this.question = question;
             this.answer = answer;
+            this.audioFileName = audioFileName;
             this.nextIntervals = nextIntervals;
             this.shownAtMs = System.currentTimeMillis();
         }
@@ -46,10 +55,11 @@ public final class AnkiCombatReviewClient {
         long noteId;
         int cardOrd;
         String[] intervals;
+        String audioFileName = null;
 
         try (Cursor cur = resolver.query(
                 SCHEDULE_URI,
-                new String[]{"note_id", "ord", "button_count", "next_review_times"},
+                new String[]{"note_id", "ord", "button_count", "next_review_times", "media_files"},
                 "limit=1",
                 null,
                 null)) {
@@ -59,6 +69,7 @@ public final class AnkiCombatReviewClient {
             cardOrd = cur.getInt(cur.getColumnIndexOrThrow("ord"));
             int buttonCount = cur.getInt(cur.getColumnIndexOrThrow("button_count"));
             intervals = parseIntervals(cur.getString(cur.getColumnIndexOrThrow("next_review_times")), buttonCount);
+            audioFileName = firstAudioFile(cur.getString(cur.getColumnIndexOrThrow("media_files")));
         }
 
         Uri cardUri = Uri.parse("content://" + AUTHORITY + "/notes/" + noteId + "/cards/" + cardOrd);
@@ -118,7 +129,19 @@ public final class AnkiCombatReviewClient {
             }
         }
 
-        return new ReviewCard(noteId, cardOrd, reps, question, answer, intervals);
+        return new ReviewCard(noteId, cardOrd, reps, question, answer, audioFileName, intervals);
+    }
+
+    public Uri getAudioUri(ReviewCard card) {
+        if (card == null || card.audioFileName == null || card.audioFileName.trim().isEmpty()) {
+            return null;
+        }
+        return new Uri.Builder()
+                .scheme("content")
+                .authority(AUTHORITY)
+                .appendPath("media")
+                .appendPath(card.audioFileName)
+                .build();
     }
 
     public boolean answerCard(ContentResolver resolver, ReviewCard card, int ease) {
@@ -163,6 +186,28 @@ public final class AnkiCombatReviewClient {
             if (target.equalsIgnoreCase(names[i].trim())) return i;
         }
         return -1;
+    }
+
+    private static String firstAudioFile(String json) {
+        if (json == null || json.trim().isEmpty()) return null;
+        try {
+            JSONArray arr = new JSONArray(json);
+            for (int i = 0; i < arr.length(); i++) {
+                String name = arr.optString(i, "").trim();
+                String lower = name.toLowerCase(Locale.ROOT);
+                if (lower.endsWith(".mp3")
+                        || lower.endsWith(".ogg")
+                        || lower.endsWith(".opus")
+                        || lower.endsWith(".wav")
+                        || lower.endsWith(".m4a")
+                        || lower.endsWith(".aac")
+                        || lower.endsWith(".flac")) {
+                    return name;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
     }
 
     private static String[] parseIntervals(String json, int count) {
