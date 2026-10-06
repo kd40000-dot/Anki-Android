@@ -7,7 +7,9 @@ import android.net.Uri;
 import android.text.Html;
 
 import org.json.JSONArray;
+import org.json.JSONObject;
 
+import java.util.Iterator;
 import java.util.Locale;
 
 /**
@@ -29,6 +31,7 @@ public final class AnkiCombatReviewClient {
         public final String question;
         public final String answer;
         public final String audioFileName;
+        public final String[] audioFileNamesByAlternative;
         public final String[] nextIntervals;
         public long shownAtMs;
 
@@ -39,6 +42,7 @@ public final class AnkiCombatReviewClient {
                 String question,
                 String answer,
                 String audioFileName,
+                String[] audioFileNamesByAlternative,
                 String[] nextIntervals) {
             this.noteId = noteId;
             this.cardOrd = cardOrd;
@@ -46,6 +50,7 @@ public final class AnkiCombatReviewClient {
             this.question = question;
             this.answer = answer;
             this.audioFileName = audioFileName;
+            this.audioFileNamesByAlternative = audioFileNamesByAlternative;
             this.nextIntervals = nextIntervals;
             this.shownAtMs = System.currentTimeMillis();
         }
@@ -91,6 +96,7 @@ public final class AnkiCombatReviewClient {
 
         String question = questionFallback;
         String answer = answerFallback;
+        String rawNotes = null;
 
         // Prefer raw Front/Back fields when the note type has them. This matches the user's
         // typed-answer note type and avoids treating back-template decorations as answer text.
@@ -113,6 +119,7 @@ public final class AnkiCombatReviewClient {
                     String[] fields = encodedFields.split("\\u001f", -1);
                     int front = findField(names, "Front");
                     int back = findField(names, "Back");
+                    int notes = findField(names, "Notes");
 
                     if (front >= 0 && front < fields.length) {
                         question = htmlToText(fields[front]);
@@ -125,22 +132,45 @@ public final class AnkiCombatReviewClient {
                     } else if (fields.length > 1) {
                         answer = htmlToText(fields[1]);
                     }
+
+                    if (notes >= 0 && notes < fields.length) {
+                        rawNotes = fields[notes];
+                    }
                 }
             }
         }
 
-        return new ReviewCard(noteId, cardOrd, reps, question, answer, audioFileName, intervals);
+        String[] audioFileNamesByAlternative = parseAudioMap(rawNotes, answer);
+        return new ReviewCard(
+                noteId,
+                cardOrd,
+                reps,
+                question,
+                answer,
+                audioFileName,
+                audioFileNamesByAlternative,
+                intervals);
     }
 
-    public Uri getAudioUri(ReviewCard card) {
-        if (card == null || card.audioFileName == null || card.audioFileName.trim().isEmpty()) {
-            return null;
+    public Uri getAudioUri(ReviewCard card, String typedAnswer) {
+        if (card == null) return null;
+
+        String filename = card.audioFileName;
+        if (card.audioFileNamesByAlternative != null) {
+            int matchedAlternative = matchingAlternativeIndex(typedAnswer, card.answer);
+            if (matchedAlternative < 0
+                    || matchedAlternative >= card.audioFileNamesByAlternative.length) {
+                return null;
+            }
+            filename = card.audioFileNamesByAlternative[matchedAlternative];
         }
+
+        if (filename == null || filename.trim().isEmpty()) return null;
         return new Uri.Builder()
                 .scheme("content")
                 .authority(AUTHORITY)
                 .appendPath("media")
-                .appendPath(card.audioFileName)
+                .appendPath(filename)
                 .build();
     }
 
@@ -169,12 +199,16 @@ public final class AnkiCombatReviewClient {
      * - accepts alternatives separated by '|'
      */
     public boolean isCorrect(String typed, String expected) {
+        return matchingAlternativeIndex(typed, expected) >= 0;
+    }
+
+    private static int matchingAlternativeIndex(String typed, String expected) {
         String normalizedTyped = normalize(typed);
         String[] alternatives = expected == null ? new String[]{""} : expected.split("\\|", -1);
-        for (String alternative : alternatives) {
-            if (normalizedTyped.equals(normalize(alternative))) return true;
+        for (int i = 0; i < alternatives.length; i++) {
+            if (normalizedTyped.equals(normalize(alternatives[i]))) return i;
         }
-        return false;
+        return -1;
     }
 
     private static String normalize(String value) {
@@ -186,6 +220,38 @@ public final class AnkiCombatReviewClient {
             if (target.equalsIgnoreCase(names[i].trim())) return i;
         }
         return -1;
+    }
+
+    private static String[] parseAudioMap(String rawNotes, String expected) {
+        if (rawNotes == null || expected == null) return null;
+
+        final String prefix = "<!--anki-audio-map:";
+        int start = rawNotes.indexOf(prefix);
+        if (start < 0) return null;
+        int end = rawNotes.indexOf("-->", start + prefix.length());
+        if (end < 0) return null;
+
+        try {
+            JSONObject mapping = new JSONObject(
+                    rawNotes.substring(start + prefix.length(), end).trim());
+            String[] alternatives = expected.split("\\|", -1);
+            String[] files = new String[alternatives.length];
+
+            for (Iterator<String> it = mapping.keys(); it.hasNext(); ) {
+                String key = it.next();
+                String normalizedKey = normalize(key);
+                for (int i = 0; i < alternatives.length; i++) {
+                    if (normalizedKey.equals(normalize(alternatives[i]))) {
+                        String value = mapping.optString(key, "").trim();
+                        files[i] = value.isEmpty() ? null : value;
+                        break;
+                    }
+                }
+            }
+            return files;
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private static String firstAudioFile(String json) {
