@@ -812,8 +812,10 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		ankiAudioPlayer = null;
 	}
 
-	private void playSubmittedAnswerAudio(AnkiCombatReviewClient.ReviewCard card) {
-		android.net.Uri audioUri = ankiClient.getAudioUri(card);
+	private void playSubmittedAnswerAudio(
+			AnkiCombatReviewClient.ReviewCard card,
+			String typedAnswer) {
+		android.net.Uri audioUri = ankiClient.getAudioUri(card, typedAnswer);
 		if (audioUri == null) return;
 
 		releaseAnkiAudio();
@@ -864,7 +866,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 
 		// Pronunciation feedback only after the attempt is locked in. Never play
 		// audio while the English question is still being answered.
-		playSubmittedAnswerAudio(ankiSession.card);
+		playSubmittedAnswerAudio(ankiSession.card, ankiSession.typedText);
 	}
 
 	private void setRatingButtonsEnabled(boolean enabled) {
