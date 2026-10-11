@@ -1,1 +1,2 @@
 Build validation marker for failed-flee combat header fix.
+Synchronize trigger.
