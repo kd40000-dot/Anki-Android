@@ -697,6 +697,17 @@ public final class CombatController implements VisualEffectCompletedCallback {
 		controllers.actorStatsController.setActorMaxAP(world.model.player);
 		if (!isFirstRound) controllers.gameRoundController.onNewPlayerRound();
 		world.model.uiSelections.isPlayersCombatTurn = true;
+
+		// Fleeing clears the combat selection so directional input can choose an escape
+		// route. If the flee attempt fails, that null selection otherwise survives the
+		// monster turn: the next Anki question appears with the monster/status bar
+		// invisible until the review is resolved and the quiz attack auto-selects a
+		// target. Re-select an adjacent aggressor at the start of the next player turn
+		// so the combat header and its in-quiz Flee button are restored immediately.
+		if (world.model.uiSelections.selectedMonster == null) {
+			selectNextAggressiveMonster();
+		}
+
 		combatTurnListeners.onNewPlayerTurn();
 	}
 
