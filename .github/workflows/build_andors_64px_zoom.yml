@@ -79,3 +79,5 @@ jobs:
           retention-days: 14
 
 # trigger retry after Actions re-enabled
+
+# Rebuild with multi-tile render preservation fix
