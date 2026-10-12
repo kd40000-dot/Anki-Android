@@ -552,13 +552,18 @@ public final class MainView extends SurfaceView
 	private void drawWorldTile(Canvas canvas, int tile, int px, int py, boolean flipped) {
 		Bitmap bitmap = tiles.getBitmap(tile);
 		if (bitmap == null) return;
+		// A 64px hero occupies one world cell; legacy oversized monster tiles
+		// continue occupying the same number of cells as in the 32px renderer.
+		boolean highResolutionHero = tile == TileManager.tileID_placeholder_hero;
+		int width = highResolutionHero ? tileSize : bitmap.getWidth() * tileSize / 32;
+		int height = highResolutionHero ? tileSize : bitmap.getHeight() * tileSize / 32;
 		canvas.save();
 		if (flipped) {
-			canvas.scale(-1f, 1f, px + tileSize / 2f, py + tileSize / 2f);
+			canvas.scale(-1f, 1f, px + width / 2f, py + height / 2f);
 		}
 		Paint sharpPaint = mPaint;
 		sharpPaint.setFilterBitmap(false);
-		canvas.drawBitmap(bitmap, null, new android.graphics.Rect(px, py, px + tileSize, py + tileSize), sharpPaint);
+		canvas.drawBitmap(bitmap, null, new Rect(px, py, px + width, py + height), sharpPaint);
 		canvas.restore();
 	}
 
