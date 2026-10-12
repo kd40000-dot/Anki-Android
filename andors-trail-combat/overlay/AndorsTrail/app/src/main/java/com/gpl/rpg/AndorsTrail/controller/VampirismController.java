@@ -26,6 +26,8 @@ public final class VampirismController {
     public static final String ITEM_NIGHTBLOOD = "nightblood_vial";
 
     private static final String TIMER_LAST_FEED = "vampire_last_feed";
+    private static final String TIMER_INFECTION = "vampire_infection_start";
+    private static final int INFECTION_ROUNDS = 60;
 
     // World rounds since the last feeding.
     private static final int THIRSTY_AFTER_ROUNDS = 16;
@@ -42,18 +44,24 @@ public final class VampirismController {
     }
 
     /**
-     * Called after world time advances but before ordinary condition durations
-     * tick down. That lets a 1-round infection transform instead of simply
-     * disappearing.
+     * Called once per player world round. Infection and feeding timers are stored
+     * in WorldData, so they survive save/load without adding new Player fields.
      */
     public static void onPlayerRound(ControllerContext controllers, WorldContext world) {
         if (world == null || world.model == null || world.model.player == null) return;
         final Player player = world.model.player;
 
         ActorCondition infection = findCondition(player, CONDITION_INFECTION);
-        if (infection != null && !isVampire(player) && infection.duration <= 1) {
-            transform(controllers, world, player);
-            return;
+        if (infection != null && !isVampire(player)) {
+            if (!world.model.worldData.hasTimerElapsed(TIMER_INFECTION, 0)) {
+                world.model.worldData.createTimer(TIMER_INFECTION);
+            }
+            if (world.model.worldData.hasTimerElapsed(TIMER_INFECTION, INFECTION_ROUNDS)) {
+                transform(controllers, world, player);
+                return;
+            }
+        } else {
+            world.model.worldData.removeTimer(TIMER_INFECTION);
         }
 
         if (!isVampire(player)) {
