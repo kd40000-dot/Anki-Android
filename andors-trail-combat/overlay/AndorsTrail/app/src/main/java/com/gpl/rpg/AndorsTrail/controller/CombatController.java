@@ -414,6 +414,7 @@ public final class CombatController implements VisualEffectCompletedCallback {
 
 		Loot loot = world.model.currentMaps.map.getBagOrCreateAt(killedMonster.position);
 		killedMonster.createLoot(loot, player);
+		VampirismController.onPlayerKilledMonster(controllers, world, killedMonster, loot);
 
 		controllers.monsterSpawnController.remove(world.model.currentMaps.map, killedMonster);
 		controllers.effectController.addSplatter(world.model.currentMaps.map, killedMonster);
@@ -844,6 +845,7 @@ public final class CombatController implements VisualEffectCompletedCallback {
 	public void endOfCombatRound() {
 		world.model.worldData.tickWorldTime();
 		controllers.gameRoundController.resetRoundTimers();
+		VampirismController.onPlayerRound(controllers, world);
 		controllers.actorStatsController.applyConditionsToPlayer(world.model.player, false);
 		controllers.actorStatsController.applyConditionsToMonsters(world.model.currentMaps.map, true);
 	}

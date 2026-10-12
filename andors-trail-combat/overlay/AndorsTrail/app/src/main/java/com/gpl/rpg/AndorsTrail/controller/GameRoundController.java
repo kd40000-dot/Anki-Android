@@ -1,0 +1,257 @@
+package com.gpl.rpg.AndorsTrail.controller;
+
+import java.util.EnumSet;
+
+import com.gpl.rpg.AndorsTrail.AndorsTrailApplication;
+import com.gpl.rpg.AndorsTrail.context.ControllerContext;
+import com.gpl.rpg.AndorsTrail.context.WorldContext;
+import com.gpl.rpg.AndorsTrail.controller.listeners.GameRoundListeners;
+import com.gpl.rpg.AndorsTrail.model.map.MapObject;
+import com.gpl.rpg.AndorsTrail.util.L;
+import com.gpl.rpg.AndorsTrail.util.TimedMessageTask;
+
+public final class GameRoundController implements TimedMessageTask.Callback {
+
+	/**
+	 * Minimal timer abstraction used to swap in a fake timer from unit tests.
+	 */
+	interface RoundTimer {
+		void start();
+		void stop();
+	}
+
+	/**
+	 * Callback used to resume combat after the last blocking pause is released.
+	 * Implemented as interface to support unit testing.
+	 */
+	interface CombatResumeHook {
+		void resumeCombatIfNeeded();
+	}
+
+	/**
+	 * Production timer implementation backed by {@link TimedMessageTask}.
+	 */
+	private static final class TimedRoundTimer implements RoundTimer {
+		private final TimedMessageTask task;
+
+		private TimedRoundTimer(TimedMessageTask task) {
+			this.task = task;
+		}
+
+		@Override
+		public void start() {
+			task.start();
+		}
+
+		@Override
+		public void stop() {
+			task.stop();
+		}
+	}
+
+	public enum PauseReason {
+		ACTIVITY_HIDDEN,
+		BLOCKING_DIALOG,
+		BLOCKING_ACTIVITY,
+		MAP_TRANSITION
+	}
+
+	private final ControllerContext controllers;
+	private final WorldContext world;
+	private final CombatResumeHook combatResumeHook;
+	private final RoundTimer roundTimer;
+	private final EnumSet<PauseReason> activePauses = EnumSet.noneOf(PauseReason.class);
+	public final GameRoundListeners gameRoundListeners = new GameRoundListeners();
+
+	/**
+	 * Creates the controller with the normal timed-task based round timer.
+	 */
+	public GameRoundController(ControllerContext controllers, WorldContext world) {
+		this.controllers = controllers;
+		this.world = world;
+		this.combatResumeHook = controllers.combatController::resumeCombatIfNeeded;
+		this.roundTimer = new TimedRoundTimer(new TimedMessageTask(this, Constants.TICK_DELAY, true));
+		activePauses.add(PauseReason.ACTIVITY_HIDDEN);
+		updateTimerState();
+	}
+
+	/**
+	 * Test-only constructor that allows the round timer implementation to be replaced.
+	 */
+	GameRoundController(ControllerContext controllers, WorldContext world, CombatResumeHook combatResumeHook, RoundTimer roundTimer) {
+		this.controllers = controllers;
+		this.world = world;
+		this.combatResumeHook = combatResumeHook;
+		this.roundTimer = roundTimer;
+		activePauses.add(PauseReason.ACTIVITY_HIDDEN);
+		updateTimerState();
+	}
+
+	private int ticksUntilNextRound = Constants.TICKS_PER_ROUND;
+	private int ticksUntilNextFullRound = Constants.TICKS_PER_FULLROUND;
+
+	@Override
+	public boolean onTick(TimedMessageTask task) {
+		if (!hasLoadedModel()) return false;
+		if (hasPauseReasons()) return false;
+		if (!world.model.uiSelections.isMainActivityVisible) return false;
+		if (world.model.uiSelections.isInCombat) return false;
+
+		onNewTick();
+
+		--ticksUntilNextRound;
+		if (ticksUntilNextRound <= 0) {
+			onNewRound();
+			restartWaitForNextRound();
+		}
+
+		--ticksUntilNextFullRound;
+		if (ticksUntilNextFullRound <= 0) {
+			onNewFullRound();
+			restartWaitForNextFullRound();
+		}
+
+		return true;
+	}
+
+	public void resetRoundTimers() {
+		restartWaitForNextRound();
+		restartWaitForNextFullRound();
+	}
+
+	/**
+	 * Marks the supplied pause reason as active.
+	 * In development builds, acquiring the same reason twice is treated as a bug.
+	 */
+	public void acquirePause(PauseReason reason) {
+		if (AndorsTrailApplication.DEVELOPMENT_DEBUGMESSAGES) {
+			if (activePauses.contains(reason)) {
+				String message = "GameRoundController: duplicate acquire for " + reason;
+				L.error(message);
+				throw new AssertionError(message);
+			}
+		}
+		activePauses.add(reason);
+		updateTimerState();
+	}
+
+	/**
+	 * Clears the supplied pause reason.
+	 * Unmatched releases fail fast in development builds and are otherwise
+	 * logged and ignored so the timer cannot be restarted by accident.
+	 */
+	public void releasePause(PauseReason reason) {
+		if (AndorsTrailApplication.DEVELOPMENT_DEBUGMESSAGES) {
+			if (!activePauses.contains(reason)) {
+				String message = "GameRoundController: unmatched release for " + reason;
+				L.error(message);
+				throw new AssertionError(message);
+			}
+		}
+		activePauses.remove(reason);
+		updateTimerState();
+		if (!hasPauseReasons()) {
+			combatResumeHook.resumeCombatIfNeeded();
+		}
+	}
+
+	/**
+	 * Marks the gameplay activity as hidden and stops the round timer until the
+	 * activity becomes visible again.  This is called when Android pauses the main activity,
+	 * such as when the user switches to another app or the device goes to sleep.
+	 */
+	public void onMainActivityPaused() {
+		acquirePause(PauseReason.ACTIVITY_HIDDEN);
+	}
+
+	/**
+	 * Clears the activity-hidden pause and restores combat state if the player
+	 * is returning to an in-progress combat session.
+	 */
+	public void onMainActivityResumed() {
+		releasePause(PauseReason.ACTIVITY_HIDDEN);
+	}
+
+	/**
+	 * Recomputes whether the round timer should run after combat state changes.
+	 */
+	public void onCombatStateChanged() {
+		updateTimerState();
+	}
+
+	private void restartWaitForNextFullRound() {
+		ticksUntilNextFullRound = Constants.TICKS_PER_FULLROUND;
+	}
+
+	private void restartWaitForNextRound() {
+		ticksUntilNextRound = Constants.TICKS_PER_ROUND;
+	}
+
+	/**
+	 * Returns whether any pause reason is currently holding the round timer.
+	 */
+	private boolean hasPauseReasons() {
+		return !activePauses.isEmpty();
+	}
+
+	/**
+	 * Returns whether the supplied pause reason is currently active.
+	 */
+	private boolean isPausedFor(PauseReason reason) {
+		return activePauses.contains(reason);
+	}
+
+	private boolean hasLoadedModel() {
+		return world.model != null && world.model.uiSelections != null;
+	}
+
+	/**
+	 * Synchronizes the derived visibility flag and the round timer with the
+	 * current pause reasons and combat state.
+	 */
+	private void updateTimerState() {
+		if (!hasLoadedModel()) {
+			roundTimer.stop();
+			return;
+		}
+		// TODO: Don't use visibility flag as proxy for pause state, or at least rename it.
+		world.model.uiSelections.isMainActivityVisible = !hasPauseReasons();
+		if (hasPauseReasons() || world.model.uiSelections.isInCombat) {
+			roundTimer.stop();
+		} else {
+			roundTimer.start();
+		}
+	}
+
+	public void onNewFullRound() {
+		controllers.mapController.resetMapsNotRecentlyVisited();
+		controllers.actorStatsController.applyConditionsToMonsters(world.model.currentMaps.map, true);
+		controllers.actorStatsController.applyConditionsToPlayer(world.model.player, true);
+		gameRoundListeners.onNewFullRound();
+	}
+
+	private void onNewRound() {
+		onNewMonsterRound();
+		onNewPlayerRound();
+		gameRoundListeners.onNewRound();
+	}
+	public void onNewPlayerRound() {
+		world.model.worldData.tickWorldTime();
+		VampirismController.onPlayerRound(controllers, world);
+		controllers.actorStatsController.applyConditionsToPlayer(world.model.player, false);
+		controllers.actorStatsController.applySkillEffectsForNewRound(world.model.player, world.model.currentMaps.map);
+		controllers.mapController.handleMapEvents(world.model.currentMaps.map, world.model.player.position, MapObject.MapObjectEvaluationType.afterEveryRound);
+	}
+	public void onNewMonsterRound() {
+		controllers.actorStatsController.applyConditionsToMonsters(world.model.currentMaps.map, false);
+	}
+
+	private void onNewTick() {
+		controllers.monsterMovementController.moveMonsters();
+		controllers.monsterSpawnController.maybeSpawn(world.model.currentMaps.map, world.model.currentMaps.tileMap);
+		controllers.monsterMovementController.attackWithAgressiveMonsters();
+		controllers.effectController.updateSplatters(world.model.currentMaps.map);
+		controllers.mapController.handleMapEvents(world.model.currentMaps.map, world.model.player.position, MapObject.MapObjectEvaluationType.continuously);
+		gameRoundListeners.onNewTick();
+	}
+}

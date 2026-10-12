@@ -1,0 +1,21 @@
+[
+    {
+        "id":"nightblood_vial",
+        "iconID":"items_consumables:35",
+        "name":"Vial of nightblood",
+        "description":"A vial of unnaturally cold blood recovered from undead remains. Drinking it may change you permanently.",
+        "hasManualPrice":1,
+        "baseMarketCost":1,
+        "category":"pot",
+        "useEffect":{
+            "conditionsSource":[
+                {
+                    "condition":"vampiric_infection",
+                    "magnitude":1,
+                    "duration":60,
+                    "chance":"100"
+                }
+            ]
+        }
+    }
+]

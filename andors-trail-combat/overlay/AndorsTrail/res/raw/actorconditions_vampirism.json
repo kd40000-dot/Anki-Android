@@ -1,0 +1,63 @@
+[
+    {
+        "id":"vampiric_infection",
+        "iconID":"actorconditions_1:60",
+        "name":"Vampiric infection",
+        "description":"Cold corruption is spreading through your blood. Seek Thoronir in the Fallhaven chapel before the change is complete.",
+        "category":"blood",
+        "isPositive":0,
+        "isStacking":0
+    },
+    {
+        "id":"vampirism",
+        "iconID":"actorconditions_1:55",
+        "name":"Vampirism",
+        "description":"You are one of the blood-cursed. Living prey can sate your hunger; undead, constructs, demons and ghosts cannot.",
+        "category":"blood",
+        "isPositive":0,
+        "isStacking":0
+    },
+    {
+        "id":"vampire_sated",
+        "iconID":"actorconditions_1:35",
+        "name":"Sated",
+        "description":"Fresh blood strengthens you and fuels unnatural regeneration.",
+        "category":"blood",
+        "isPositive":1,
+        "isStacking":0,
+        "abilityEffect":{
+            "increaseAttackChance":8,
+            "increaseBlockChance":5,
+            "increaseAttackDamage":{
+                "min":1,
+                "max":1
+            }
+        }
+    },
+    {
+        "id":"vampire_thirsty",
+        "iconID":"actorconditions_1:56",
+        "name":"Thirsty",
+        "description":"The hunger is returning. Your focus is beginning to slip.",
+        "category":"blood",
+        "isPositive":0,
+        "isStacking":0,
+        "abilityEffect":{
+            "increaseAttackChance":-3
+        }
+    },
+    {
+        "id":"vampire_starving",
+        "iconID":"actorconditions_1:57",
+        "name":"Starving",
+        "description":"The blood hunger is consuming you. Feed on living prey soon.",
+        "category":"blood",
+        "isPositive":0,
+        "isStacking":0,
+        "abilityEffect":{
+            "increaseAttackChance":-12,
+            "increaseBlockChance":-8,
+            "increaseMoveCost":1
+        }
+    }
+]
