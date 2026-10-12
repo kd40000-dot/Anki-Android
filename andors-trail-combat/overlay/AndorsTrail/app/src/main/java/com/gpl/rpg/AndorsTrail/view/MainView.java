@@ -59,6 +59,8 @@ public final class MainView extends SurfaceView
 	private final int tileSize;
 	private float scale;
 	private int scaledTileSize;
+	private float pinchPreviousDistance = 0f;
+	private boolean handlingPinch = false;
 
 	private Size screenSizeTileCount = null;
 	private final Coord screenOffset = new Coord(); // pixel offset where the image begins
@@ -155,7 +157,7 @@ public final class MainView extends SurfaceView
 
 		
 		this.scale = world.tileManager.scale;
-		this.mPaint.setFilterBitmap(scale != 1);
+		this.mPaint.setFilterBitmap(false); // Keep source pixels crisp during map drawing.
 		this.scaledTileSize = world.tileManager.viewTileSize;
 //		this.surfaceSize = new Size(w, h);
 		this.surfaceSize = new Size((int) (getWidth() / scale), (int) (getHeight() / scale));
@@ -190,6 +192,31 @@ public final class MainView extends SurfaceView
 	public boolean onTouchEvent(MotionEvent event) {
 		if (!canAcceptInput()) return true;
 
+		if (event.getPointerCount() >= 2) {
+			float dx = event.getX(0) - event.getX(1);
+			float dy = event.getY(0) - event.getY(1);
+			float distance = (float) Math.sqrt(dx * dx + dy * dy);
+			if (!handlingPinch) {
+				handlingPinch = true;
+				pinchPreviousDistance = distance;
+				inputController.onTouchCancel();
+			} else if (pinchPreviousDistance > 0f && distance > 0f) {
+				float ratio = distance / pinchPreviousDistance;
+				if (ratio > 1.12f || ratio < 0.89f) {
+					updateCameraZoom(ratio > 1f ? 0.25f : -0.25f);
+					pinchPreviousDistance = distance;
+				}
+			}
+			return true;
+		}
+		if (handlingPinch) {
+			if (event.getActionMasked() == MotionEvent.ACTION_UP || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+				handlingPinch = false;
+				pinchPreviousDistance = 0f;
+			}
+			return true;
+		}
+
 		switch (event.getAction()) {
 		case MotionEvent.ACTION_DOWN:
 		case MotionEvent.ACTION_MOVE:
@@ -207,6 +234,17 @@ public final class MainView extends SurfaceView
 		return super.onTouchEvent(event);
 	}
 	
+	private void updateCameraZoom(float delta) {
+		float next = Math.max(0.75f, Math.min(2f, preferences.scalingFactor + delta));
+		if (next == preferences.scalingFactor) return;
+		preferences.scalingFactor = next;
+		android.preference.PreferenceManager.getDefaultSharedPreferences(getContext())
+				.edit().putString("scaling_factor", Float.toString(next)).apply();
+		world.tileManager.updatePreferences(preferences);
+		// Recalculate both the drawing surface and touch-to-tile coordinates.
+		surfaceChanged(holder, 0, getWidth(), getHeight());
+	}
+
 	private boolean canAcceptInput() {
 		if (!model.uiSelections.isMainActivityVisible) return false;
 		if (!hasSurface) return false;
@@ -437,7 +475,7 @@ public final class MainView extends SurfaceView
 			if (useEquipmentAppearance) {
 				drawPlayerAppearance(canvas, x, y);
 			} else {
-				tiles.drawTile(canvas, model.player.mapIconID, x, y, mPaint);
+				drawWorldTile(canvas, model.player.mapIconID, x, y, false);
 			}
 		}
 		for (MonsterSpawnArea a : currentMap.spawnAreas) {
@@ -449,7 +487,7 @@ public final class MainView extends SurfaceView
 					if (vfxElapsedTime > m.vfxDuration) vfxElapsedTime = m.vfxDuration;
 					int x = ((m.position.x - mapViewArea.topLeft.x) * tileSize * vfxElapsedTime + ((m.lastPosition.x - mapViewArea.topLeft.x) * tileSize * (m.vfxDuration - vfxElapsedTime))) / m.vfxDuration;
 					int y = ((m.position.y - mapViewArea.topLeft.y) * tileSize * vfxElapsedTime + ((m.lastPosition.y - mapViewArea.topLeft.y) * tileSize * (m.vfxDuration - vfxElapsedTime))) / m.vfxDuration;
-					tiles.drawTile(canvas, m.iconID, x, y, mPaint, m.isFlippedX);
+					drawWorldTile(canvas, m.iconID, x, y, m.isFlippedX);
 				}
 			}
 		}
@@ -500,7 +538,7 @@ public final class MainView extends SurfaceView
 				if (mx >= currentMap.size.width) break;
 				final int tile = layer.tiles[mx][my];
 				if (tile == 0) continue;
-				tiles.drawTile(canvas, tile, px, py, mPaint);
+				drawWorldTile(canvas, tile, px, py, false);
 			}
 		}
 	}
@@ -511,6 +549,19 @@ public final class MainView extends SurfaceView
 		
 	}
 	
+	private void drawWorldTile(Canvas canvas, int tile, int px, int py, boolean flipped) {
+		Bitmap bitmap = tiles.getBitmap(tile);
+		if (bitmap == null) return;
+		canvas.save();
+		if (flipped) {
+			canvas.scale(-1f, 1f, px + tileSize / 2f, py + tileSize / 2f);
+		}
+		Paint sharpPaint = mPaint;
+		sharpPaint.setFilterBitmap(false);
+		canvas.drawBitmap(bitmap, null, new android.graphics.Rect(px, py, px + tileSize, py + tileSize), sharpPaint);
+		canvas.restore();
+	}
+
 	private void drawPlayerAppearance(Canvas canvas, int px, int py) {
 		Bitmap bitmap = world.tileManager.getPlayerAppearanceBitmap(getResources(), model.player);
 		if (bitmap != null) canvas.drawBitmap(bitmap, px, py, mPaint);
@@ -547,7 +598,7 @@ public final class MainView extends SurfaceView
 		y -= mapViewArea.topLeft.y;
 //		if (	   (x >= 0 && x < mapViewArea.size.width)
 //				&& (y >= 0 && y < mapViewArea.size.height)) {
-		tiles.drawTile(canvas, tile, x * tileSize, y * tileSize, mPaint, isFlippedX);
+		drawWorldTile(canvas, tile, x * tileSize, y * tileSize, isFlippedX);
 //		}
 	}
 
