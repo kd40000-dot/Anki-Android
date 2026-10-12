@@ -5,6 +5,7 @@ on:
     workflows:
       - Build Andor's Trail UI Playground APK
       - 🛠️ Screenshots: Comment
+      - Build AnkiDroid Typed Retry APK
     types:
       - completed
 
