@@ -4,6 +4,7 @@ on:
   workflow_run:
     workflows:
       - Build Andor's Trail UI Playground APK
+      - 🛠️ Screenshots: Comment
     types:
       - completed
 
