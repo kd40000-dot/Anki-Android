@@ -47,7 +47,8 @@ public final class HeroSpriteHotSwap {
 	public static final String FOLDER_FOOTWEAR = "Footwear";
 
 	private static final int REQUEST_STORAGE = 0x4171;
-	private static final int TARGET_SIZE = 32;
+	private static final int LEGACY_SIZE = 32;
+	public static final int TARGET_SIZE = 64;
 	private static final long POLL_INTERVAL_MS = 250L;
 	private static boolean permissionPromptLaunched = false;
 	private static long lastSignaturePoll = 0L;
@@ -135,8 +136,8 @@ public final class HeroSpriteHotSwap {
 		if (readme.exists()) return;
 		String text =
 				"Andor's Trail sprite hot-swap folder\n\n" +
-				"Use transparent 32x32 PNG files. Sprites are loaded pixel-for-pixel and are never resized.\n" +
-				"Files with any other dimensions are ignored so the game cannot distort your art.\n\n" +
+				"Use transparent 64x64 PNG files for full detail. Legacy 32x32 sprites are upscaled exactly 2x with nearest-neighbor.\n" +
+				"Other dimensions are ignored. Every sprite layer must use the same character pose and alignment.\n\n" +
 				"Base/Base.png\n" +
 				"Headwear/<exact in-game item name>.png\n" +
 				"Armor/<exact in-game item name>.png\n" +
@@ -250,8 +251,13 @@ public final class HeroSpriteHotSwap {
 		BitmapFactory.Options options = new BitmapFactory.Options();
 		options.inScaled = false;
 		Bitmap decoded = BitmapFactory.decodeFile(path, options);
-		Bitmap exact = decoded != null && decoded.getWidth() == TARGET_SIZE && decoded.getHeight() == TARGET_SIZE
-				? decoded : null;
+		Bitmap exact = null;
+		if (decoded != null && decoded.getWidth() == TARGET_SIZE && decoded.getHeight() == TARGET_SIZE) {
+			exact = decoded;
+		} else if (decoded != null && decoded.getWidth() == LEGACY_SIZE && decoded.getHeight() == LEGACY_SIZE) {
+			exact = Bitmap.createScaledBitmap(decoded, TARGET_SIZE, TARGET_SIZE, false);
+			decoded.recycle();
+		}
 		CachedBitmap next = new CachedBitmap();
 		next.modified = modified;
 		next.length = length;
