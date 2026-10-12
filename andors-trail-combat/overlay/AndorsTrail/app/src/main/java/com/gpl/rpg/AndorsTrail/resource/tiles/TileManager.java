@@ -637,7 +637,7 @@ public final class TileManager {
 	}
 
 	private Bitmap buildHotSwapPlayerAppearance(Resources res, Player player) {
-		Bitmap result = Bitmap.createBitmap(HERO_EQUIPMENT_TILE_SIZE, HERO_EQUIPMENT_TILE_SIZE, Bitmap.Config.ARGB_8888);
+		Bitmap result = Bitmap.createBitmap(HeroSpriteHotSwap.TARGET_SIZE, HeroSpriteHotSwap.TARGET_SIZE, Bitmap.Config.ARGB_8888);
 		Canvas canvas = new Canvas(result);
 		Paint paint = new Paint();
 		paint.setFilterBitmap(false);
@@ -650,7 +650,7 @@ public final class TileManager {
 			base = getFallbackHeroBitmap(res, player);
 		}
 		if (hasVisiblePixels(base)) {
-			canvas.drawBitmap(base, 0, 0, paint);
+			drawHeroHotSwapBitmap(canvas, base, paint);
 		}
 
 		ItemType body = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.body);
@@ -664,30 +664,35 @@ public final class TileManager {
 		// lower body first, then torso, gloves, headwear, offhand and mainhand.
 		// Missing files draw nothing for that equipment slot.
 		Bitmap feetSprite = HeroSpriteHotSwap.loadItemSprite(HeroSpriteHotSwap.FOLDER_FOOTWEAR, feet, player);
-		if (hasVisiblePixels(feetSprite)) canvas.drawBitmap(feetSprite, 0, 0, paint);
+		if (hasVisiblePixels(feetSprite)) drawHeroHotSwapBitmap(canvas, feetSprite, paint);
 
 		Bitmap bodySprite = HeroSpriteHotSwap.loadItemSprite(HeroSpriteHotSwap.FOLDER_ARMOR, body, player);
-		if (hasVisiblePixels(bodySprite)) canvas.drawBitmap(bodySprite, 0, 0, paint);
+		if (hasVisiblePixels(bodySprite)) drawHeroHotSwapBitmap(canvas, bodySprite, paint);
 
 		Bitmap handSprite = HeroSpriteHotSwap.loadItemSprite(HeroSpriteHotSwap.FOLDER_GLOVES, hands, player);
-		if (hasVisiblePixels(handSprite)) canvas.drawBitmap(handSprite, 0, 0, paint);
+		if (hasVisiblePixels(handSprite)) drawHeroHotSwapBitmap(canvas, handSprite, paint);
 
 		Bitmap headSprite = HeroSpriteHotSwap.loadItemSprite(HeroSpriteHotSwap.FOLDER_HEADWEAR, head, player);
-		if (hasVisiblePixels(headSprite)) canvas.drawBitmap(headSprite, 0, 0, paint);
+		if (hasVisiblePixels(headSprite)) drawHeroHotSwapBitmap(canvas, headSprite, paint);
 
 		Bitmap offhandSprite = HeroSpriteHotSwap.loadItemSprite(HeroSpriteHotSwap.FOLDER_OFFHAND, offHand, player);
-		if (hasVisiblePixels(offhandSprite)) canvas.drawBitmap(offhandSprite, 0, 0, paint);
+		if (hasVisiblePixels(offhandSprite)) drawHeroHotSwapBitmap(canvas, offhandSprite, paint);
 
 		Bitmap mainhandSprite = HeroSpriteHotSwap.loadItemSprite(HeroSpriteHotSwap.FOLDER_MAINHAND, mainHand, player);
 		if (hasVisiblePixels(mainhandSprite)) {
-			canvas.drawBitmap(mainhandSprite, 0, 0, paint);
+			drawHeroHotSwapBitmap(canvas, mainhandSprite, paint);
 		}
 
 		if (!hasVisiblePixels(result)) {
 			Bitmap fallback = getFallbackHeroBitmap(res, player);
-			if (fallback != null) canvas.drawBitmap(fallback, 0, 0, paint);
+			if (fallback != null) drawHeroHotSwapBitmap(canvas, fallback, paint);
 		}
 		return result;
+	}
+
+	private static void drawHeroHotSwapBitmap(Canvas canvas, Bitmap bitmap, Paint paint) {
+		if (bitmap == null) return;
+		canvas.drawBitmap(bitmap, null, new Rect(0, 0, HeroSpriteHotSwap.TARGET_SIZE, HeroSpriteHotSwap.TARGET_SIZE), paint);
 	}
 
 	private Bitmap buildPlayerAppearance(Resources res, Player player) {
@@ -837,7 +842,9 @@ public final class TileManager {
 	public Bitmap getPlayerAppearanceBitmap(Resources res, Player player) {
 		String signature = getPlayerAppearanceSignature(player);
 		if (playerAppearanceBitmap == null || !signature.equals(playerAppearanceSignature)) {
-			playerAppearanceBitmap = buildPlayerAppearance(res, player);
+			Bitmap composed = buildPlayerAppearance(res, player);
+			playerAppearanceBitmap = composed.getWidth() == HeroSpriteHotSwap.TARGET_SIZE
+					? composed : Bitmap.createScaledBitmap(composed, HeroSpriteHotSwap.TARGET_SIZE, HeroSpriteHotSwap.TARGET_SIZE, false);
 			playerAppearanceSignature = signature;
 		}
 		return playerAppearanceBitmap;
@@ -940,15 +947,15 @@ public final class TileManager {
 		density = r.getDisplayMetrics().density;
 		uiIconScale = 100 * density;
 //		tileSize = (int) (32 * density);
-		if (density < 1) tileSize = (int) (32 * density);
-		else tileSize = 32;
+		// Render into a true 64-pixel world tile; camera scale preserves the prior field of view.
+		tileSize = 64;
 	}
 
 	public void updatePreferences(AndorsTrailPreferences prefs) {
 		float densityScaler = 1;
 		if (density > 1) densityScaler = density;
-		scale = prefs.scalingFactor * densityScaler;
-		viewTileSize = (int) (tileSize * prefs.scalingFactor * densityScaler);
+		scale = prefs.scalingFactor * densityScaler * 0.5f;
+		viewTileSize = Math.max(1, (int) (tileSize * scale));
 	}
 
 
