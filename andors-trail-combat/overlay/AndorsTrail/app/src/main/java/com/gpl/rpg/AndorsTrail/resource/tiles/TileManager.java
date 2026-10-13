@@ -637,12 +637,13 @@ public final class TileManager {
 	}
 
 	private Bitmap buildHotSwapPlayerAppearance(Resources res, Player player) {
-		Bitmap result = Bitmap.createBitmap(HERO_EQUIPMENT_TILE_SIZE, HERO_EQUIPMENT_TILE_SIZE, Bitmap.Config.ARGB_8888);
+		// Player-only high-resolution composition. World tile and camera stay 32px.
+		Bitmap result = Bitmap.createBitmap(HeroSpriteHotSwap.TARGET_SIZE, HeroSpriteHotSwap.TARGET_SIZE, Bitmap.Config.ARGB_8888);
 		Canvas canvas = new Canvas(result);
 		Paint paint = new Paint();
 		paint.setFilterBitmap(false);
 
-		Bitmap base = HeroSpriteHotSwap.loadBaseSprite();
+		Bitmap base = HeroSpriteHotSwap.loadBaseSprite(player);
 		if (!hasVisiblePixels(base)) {
 			base = getHeroEquipmentBase(res);
 		}
@@ -650,7 +651,7 @@ public final class TileManager {
 			base = getFallbackHeroBitmap(res, player);
 		}
 		if (hasVisiblePixels(base)) {
-			canvas.drawBitmap(base, 0, 0, paint);
+			drawHotSwapLayer(canvas, base, paint);
 		}
 
 		ItemType body = player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.body);
@@ -664,30 +665,37 @@ public final class TileManager {
 		// lower body first, then torso, gloves, headwear, offhand and mainhand.
 		// Missing files draw nothing for that equipment slot.
 		Bitmap feetSprite = HeroSpriteHotSwap.loadItemSprite(HeroSpriteHotSwap.FOLDER_FOOTWEAR, feet, player);
-		if (hasVisiblePixels(feetSprite)) canvas.drawBitmap(feetSprite, 0, 0, paint);
+		if (hasVisiblePixels(feetSprite)) drawHotSwapLayer(canvas, feetSprite, paint);
 
 		Bitmap bodySprite = HeroSpriteHotSwap.loadItemSprite(HeroSpriteHotSwap.FOLDER_ARMOR, body, player);
-		if (hasVisiblePixels(bodySprite)) canvas.drawBitmap(bodySprite, 0, 0, paint);
+		if (hasVisiblePixels(bodySprite)) drawHotSwapLayer(canvas, bodySprite, paint);
 
 		Bitmap handSprite = HeroSpriteHotSwap.loadItemSprite(HeroSpriteHotSwap.FOLDER_GLOVES, hands, player);
-		if (hasVisiblePixels(handSprite)) canvas.drawBitmap(handSprite, 0, 0, paint);
+		if (hasVisiblePixels(handSprite)) drawHotSwapLayer(canvas, handSprite, paint);
 
 		Bitmap headSprite = HeroSpriteHotSwap.loadItemSprite(HeroSpriteHotSwap.FOLDER_HEADWEAR, head, player);
-		if (hasVisiblePixels(headSprite)) canvas.drawBitmap(headSprite, 0, 0, paint);
+		if (hasVisiblePixels(headSprite)) drawHotSwapLayer(canvas, headSprite, paint);
 
 		Bitmap offhandSprite = HeroSpriteHotSwap.loadItemSprite(HeroSpriteHotSwap.FOLDER_OFFHAND, offHand, player);
-		if (hasVisiblePixels(offhandSprite)) canvas.drawBitmap(offhandSprite, 0, 0, paint);
+		if (hasVisiblePixels(offhandSprite)) drawHotSwapLayer(canvas, offhandSprite, paint);
 
 		Bitmap mainhandSprite = HeroSpriteHotSwap.loadItemSprite(HeroSpriteHotSwap.FOLDER_MAINHAND, mainHand, player);
 		if (hasVisiblePixels(mainhandSprite)) {
-			canvas.drawBitmap(mainhandSprite, 0, 0, paint);
+			drawHotSwapLayer(canvas, mainhandSprite, paint);
 		}
 
 		if (!hasVisiblePixels(result)) {
 			Bitmap fallback = getFallbackHeroBitmap(res, player);
-			if (fallback != null) canvas.drawBitmap(fallback, 0, 0, paint);
+			if (fallback != null) drawHotSwapLayer(canvas, fallback, paint);
 		}
 		return result;
+	}
+
+	/** Map-aligned sprite layers are always composited on one 64px canvas. */
+	private static void drawHotSwapLayer(Canvas canvas, Bitmap source, Paint paint) {
+		if (source == null) return;
+		canvas.drawBitmap(source, null,
+				new Rect(0, 0, HeroSpriteHotSwap.TARGET_SIZE, HeroSpriteHotSwap.TARGET_SIZE), paint);
 	}
 
 	private Bitmap buildPlayerAppearance(Resources res, Player player) {
@@ -845,14 +853,25 @@ public final class TileManager {
 
 	public Drawable getPlayerAppearanceDrawable(Resources res, Player player, boolean large) {
 		Bitmap bitmap = getPlayerAppearanceBitmap(res, player);
-		if (large) {
-			bitmap = Bitmap.createScaledBitmap(bitmap, HERO_EQUIPMENT_TILE_SIZE * 2, HERO_EQUIPMENT_TILE_SIZE * 2, false);
+		// Keep existing 32px UI icons and render larger portraits at native 64px.
+		int desiredSize = large ? HeroSpriteHotSwap.TARGET_SIZE : HERO_EQUIPMENT_TILE_SIZE;
+		if (bitmap.getWidth() != desiredSize || bitmap.getHeight() != desiredSize) {
+			bitmap = Bitmap.createScaledBitmap(bitmap, desiredSize, desiredSize, false);
 		}
 		return new BitmapDrawable(res, bitmap);
 	}
 
 	public void setPlayerAppearanceImageView(Resources res, ImageView imageView, Player player, boolean large) {
 		setImageViewTile(imageView, getPlayerAppearanceDrawable(res, player, large));
+	}
+
+	/** Tile collection placeholders always retain the game's original 32px dimensions. */
+	private Bitmap getPlayerMapPlaceholder(Resources res, Player player) {
+		Bitmap composed = getPlayerAppearanceBitmap(res, player);
+		if (composed.getWidth() == HERO_EQUIPMENT_TILE_SIZE
+				&& composed.getHeight() == HERO_EQUIPMENT_TILE_SIZE) return composed;
+		return Bitmap.createScaledBitmap(composed,
+				HERO_EQUIPMENT_TILE_SIZE, HERO_EQUIPMENT_TILE_SIZE, false);
 	}
 
 	public void refreshPlayerAppearance(Resources res, WorldContext world) {
@@ -862,7 +881,7 @@ public final class TileManager {
 				&& world.model.currentMaps.tiles != null) {
 			world.model.currentMaps.tiles.setBitmap(
 					tileID_placeholder_hero,
-					getPlayerAppearanceBitmap(res, world.model.player));
+					getPlayerMapPlaceholder(res, world.model.player));
 		}
 	}
 
@@ -874,7 +893,8 @@ public final class TileManager {
 		playerAppearanceBitmap = buildPlayerAppearance(res, world.model.player);
 		playerAppearanceSignature = signature;
 		if (world.model.currentMaps != null && world.model.currentMaps.tiles != null) {
-			world.model.currentMaps.tiles.setBitmap(tileID_placeholder_hero, playerAppearanceBitmap);
+			world.model.currentMaps.tiles.setBitmap(tileID_placeholder_hero,
+					getPlayerMapPlaceholder(res, world.model.player));
 		}
 		return true;
 	}
@@ -916,7 +936,7 @@ public final class TileManager {
 	}
 
 	private void updatePlaceholdersTiles(TileCollection result, WorldContext world, Resources res) {
-		result.setBitmap(tileID_placeholder_hero, getPlayerAppearanceBitmap(res, world.model.player));
+		result.setBitmap(tileID_placeholder_hero, getPlayerMapPlaceholder(res, world.model.player));
 	}
 
 	public HashSet<Integer> getTileIDsFor(PredefinedMap map, LayeredTileMap tileMap, WorldContext world) {
