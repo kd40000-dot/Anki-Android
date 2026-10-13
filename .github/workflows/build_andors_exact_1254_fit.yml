@@ -1,0 +1,80 @@
+name: Build Exact-Fit 1254px Sprites APK
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build_andors_exact_1254_fit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: andors-trail-1254px-exact-fit
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout high-resolution sprite integration
+        uses: actions/checkout@v5
+        with:
+          ref: feature/exact-1254-fit-2026-10-13
+          sparse-checkout: |
+            andors-trail-combat
+            tools
+
+      - name: Checkout current Andor's Trail upstream
+        uses: actions/checkout@v5
+        with:
+          repository: AndorsTrailRelease/andors-trail
+          ref: master
+          path: andors-upstream
+          sparse-checkout: AndorsTrail
+
+      - name: Apply combat integration overlay
+        run: cp -a andors-trail-combat/overlay/. andors-upstream/
+
+      - name: Configure stable test signing key
+        run: |
+          cp tools/fallback-release-keystore.jks andors-upstream/AndorsTrail/andors-debug-keystore.jks
+          cat > andors-upstream/AndorsTrail/keystore.properties <<'EOF'
+          betaStoreFile=../andors-debug-keystore.jks
+          betaStorePassword=Test@123
+          betaKeyAlias=my-key
+          betaKeyPassword=Test@123
+          EOF
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android 36 SDK
+        run: |
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Assemble exact-fit sprite APK
+        run: |
+          cd andors-upstream/AndorsTrail
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: andors-trail-1254px-exact-fit-apk
+          path: andors-upstream/AndorsTrail/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
