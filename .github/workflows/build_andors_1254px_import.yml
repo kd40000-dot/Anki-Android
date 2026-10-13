@@ -24,7 +24,7 @@ jobs:
       - name: Checkout high-resolution sprite integration
         uses: actions/checkout@v5
         with:
-          ref: feature/1254-sprite-input-2026-10-13
+          ref: fix/1254-map-overdraw-2026-10-13
           sparse-checkout: |
             andors-trail-combat
             tools
@@ -73,7 +73,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: andors-trail-1254px-import-apk
+          name: andors-trail-1254px-map-fixed-apk
           path: andors-upstream/AndorsTrail/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
