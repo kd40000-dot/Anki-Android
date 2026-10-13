@@ -2,6 +2,7 @@ package com.gpl.rpg.AndorsTrail.resource.tiles;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.HashMap;
 
@@ -21,6 +22,9 @@ import android.os.Environment;
 import android.os.SystemClock;
 import android.provider.Settings;
 import android.widget.Toast;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 import com.gpl.rpg.AndorsTrail.model.actor.Player;
 import com.gpl.rpg.AndorsTrail.model.item.ItemType;
@@ -64,6 +68,8 @@ public final class HeroSpriteHotSwap {
 		long length;
 		Bitmap bitmap;
 		boolean keepCanvas;
+		long fitModified;
+		long fitLength;
 	}
 
 	private HeroSpriteHotSwap() { }
@@ -135,6 +141,7 @@ public final class HeroSpriteHotSwap {
 		}
 		writeReadme(root);
 		writeLargeSpriteGuide(root);
+		writeAlignmentGuide(root);
 	}
 
 	private static void writeReadme(File root) {
@@ -177,6 +184,33 @@ public final class HeroSpriteHotSwap {
 				"create an empty companion file named exactly '<name>.png.aligned' to disable automatic slot fitting.\n" +
 				"Example: Armor/Kid's shirt.png.aligned\n" +
 				"All equipment is composited over the same fixed 64x64 render canvas.\n";
+		try (FileOutputStream out = new FileOutputStream(guide)) {
+			out.write(text.getBytes("UTF-8"));
+		} catch (IOException ignored) { }
+	}
+
+
+	private static void writeAlignmentGuide(File root) {
+		File guide = new File(root, "1254_EXACT_ALIGNMENT.txt");
+		if (guide.exists()) return;
+		String text =
+				"1254px equipment alignment (64px in-game canvas)\n\n" +
+				"The six original equipment sprites have individually measured built-in placements.\n" +
+				"Both gloves and both boots are positioned separately over the player's hands and feet.\n" +
+				"Base/Base.png is drawn across the complete canvas, unchanged.\n" +
+				"Do not create any companion files for the supplied test set.\n\n" +
+				"To override any 1254px artwork placement without recompiling, put a\n" +
+				"JSON file next to it: Armor/Kid's shirt.png.fit.json\n\n" +
+				"Single component:\n" +
+				"{\"sourceCrop\":[314,453,960,972],\"destination\":[16,29,48,47]}\n\n" +
+				"Multiple components (gloves/boots):\n" +
+				"{\"parts\":[{\"sourceCrop\":[368,816,577,1047],\"destination\":[19,46,29,57]},"
+				+ "{\"sourceCrop\":[678,816,886,1047],\"destination\":[37,46,47,57]}]}\n\n" +
+				"sourceCrop uses coordinates of the original 1254x1254 PNG.\n" +
+				"destination uses the final 64x64 game character canvas.\n" +
+				"Changes to .fit.json are detected while the game is running.\n" +
+				"An empty PNG.aligned companion still disables automatic placement\n" +
+				"when no .fit.json exists. Unknown equipment uses per-slot fallback.\n";
 		try (FileOutputStream out = new FileOutputStream(guide)) {
 			out.write(text.getBytes("UTF-8"));
 		} catch (IOException ignored) { }
@@ -236,8 +270,10 @@ public final class HeroSpriteHotSwap {
 	private static String stamp(File file) {
 		if (file == null || !file.isFile()) return "-";
 		File aligned = new File(file.getAbsolutePath() + ".aligned");
+		File fit = new File(file.getAbsolutePath() + ".fit.json");
 		return file.getAbsolutePath() + ":" + file.lastModified() + ":" + file.length()
-				+ (aligned.isFile() ? ":aligned" : ":autofit");
+				+ (aligned.isFile() ? ":aligned" : ":autofit")
+				+ (fit.isFile() ? (":fit:" + fit.lastModified() + ":" + fit.length()) : ":no-fit");
 	}
 
 	private static String computeActiveSignature(Player player) {
@@ -268,25 +304,149 @@ public final class HeroSpriteHotSwap {
 		return lastActiveSignature;
 	}
 
-	/**
-	 * 1254px inputs are source artwork, not 1254px world tiles.
-	 * Sample them before decoding and rasterize each layer on the 64px player canvas.
-	 * This prevents large PNGs from inflating memory usage or changing map geometry.
-	 */
-	private static Bitmap fitLargeSprite(Bitmap source, String folder, boolean keepCanvas) {
-		Rect src = new Rect(0, 0, source.getWidth(), source.getHeight());
-		Rect dst = new Rect(0, 0, TARGET_SIZE, TARGET_SIZE);
-		if (!FOLDER_BASE.equals(folder) && !keepCanvas) {
-			Rect content = visibleContentBounds(source);
-			if (content != null) src = content;
-			dst = slotBounds(folder);
+
+	/** Original-pixel crop and exact 64-pixel destination for a layer or component. */
+	private static final class LargeSpritePlacement {
+		final Rect sourceCrop;
+		final Rect destination;
+		LargeSpritePlacement(Rect sourceCrop, Rect destination) {
+			this.sourceCrop = sourceCrop;
+			this.destination = destination;
 		}
+	}
+
+	private static LargeSpritePlacement placement(int x0, int y0, int x1, int y1,
+			int dx0, int dy0, int dx1, int dy1) {
+		return new LargeSpritePlacement(new Rect(x0, y0, x1, y1),
+				new Rect(dx0, dy0, dx1, dy1));
+	}
+
+	/**
+	 * Exact visual-component bounds measured from the original 1254x1254 art,
+	 * mapped to the body landmarks on the supplied Base sprite's 64x64 canvas.
+	 * Unlike the former alpha-bounds table, these crops discard near-invisible
+	 * fringe pixels and transparent margins. Gloves and boots use two parts.
+	 */
+	private static LargeSpritePlacement[] knownPlacements(String folder, File file) {
+		if (file == null) return null;
+		String name = file.getName();
+		if (FOLDER_HEADWEAR.equals(folder) && name.equalsIgnoreCase("Fine green hat.png")) {
+			return new LargeSpritePlacement[] {
+				placement(342, 423, 1035, 831, 15, 3, 50, 24)
+			};
+		}
+		if (FOLDER_ARMOR.equals(folder) && name.equalsIgnoreCase("Kid's shirt.png")) {
+			return new LargeSpritePlacement[] {
+				placement(314, 453, 960, 972, 16, 29, 48, 47)
+			};
+		}
+		if (FOLDER_MAINHAND.equals(folder) && name.equalsIgnoreCase("Sharp steel rapier.png")) {
+			return new LargeSpritePlacement[] {
+				placement(313, 268, 830, 996, 1, 13, 29, 48)
+			};
+		}
+		if (FOLDER_OFFHAND.equals(folder) && name.equalsIgnoreCase("Kid's shield.png")) {
+			return new LargeSpritePlacement[] {
+				placement(487, 485, 891, 999, 43, 30, 59, 51)
+			};
+		}
+		if (FOLDER_GLOVES.equals(folder) && name.equalsIgnoreCase("Gloves of better grip.png")) {
+			return new LargeSpritePlacement[] {
+				placement(371, 679, 543, 883, 16, 36, 26, 45),
+				placement(716, 679, 885, 883, 42, 36, 52, 45)
+			};
+		}
+		if (FOLDER_FOOTWEAR.equals(folder) && name.equalsIgnoreCase("Crude leather boots.png")) {
+			return new LargeSpritePlacement[] {
+				placement(368, 816, 577, 1047, 19, 46, 29, 57),
+				placement(678, 816, 886, 1047, 37, 46, 47, 57)
+			};
+		}
+		return null;
+	}
+
+	private static Rect rectFromJson(JSONArray array, int max) throws Exception {
+		if (array == null || array.length() != 4) throw new IllegalArgumentException("Rect must have 4 numbers");
+		int x0 = array.getInt(0), y0 = array.getInt(1);
+		int x1 = array.getInt(2), y1 = array.getInt(3);
+		if (x0 < 0 || y0 < 0 || x1 > max || y1 > max || x1 <= x0 || y1 <= y0) {
+			throw new IllegalArgumentException("Out-of-bounds or empty rect");
+		}
+		return new Rect(x0, y0, x1, y1);
+	}
+
+	private static LargeSpritePlacement parsePlacement(JSONObject o) throws Exception {
+		return new LargeSpritePlacement(
+				rectFromJson(o.getJSONArray("sourceCrop"), LARGE_SOURCE_SIZE),
+				rectFromJson(o.getJSONArray("destination"), TARGET_SIZE));
+	}
+
+	/** Sidecar settings take precedence over built-in per-item coordinates. */
+	private static LargeSpritePlacement[] readPlacements(File artFile) {
+		File sidecar = new File(artFile.getAbsolutePath() + ".fit.json");
+		if (!sidecar.isFile() || sidecar.length() > 16384L) return null;
+		StringBuilder data = new StringBuilder();
+		try (FileInputStream in = new FileInputStream(sidecar)) {
+			byte[] bytes = new byte[4096];
+			int n;
+			while ((n = in.read(bytes)) != -1) {
+				if (data.length() + n > 16384) return null;
+				data.append(new String(bytes, 0, n, "UTF-8"));
+			}
+			JSONObject document = new JSONObject(data.toString());
+			JSONArray parts = document.optJSONArray("parts");
+			if (parts != null) {
+				if (parts.length() < 1 || parts.length() > 8) return null;
+				LargeSpritePlacement[] placements = new LargeSpritePlacement[parts.length()];
+				for (int i = 0; i < placements.length; i++)
+					placements[i] = parsePlacement(parts.getJSONObject(i));
+				return placements;
+			}
+			return new LargeSpritePlacement[] {parsePlacement(document)};
+		} catch (Exception ignored) {
+			return null;
+		}
+	}
+
+	/** Source coordinates are in the 1254px PNG; decoded bitmap is sampled 8x. */
+	private static Rect sampledRect(Rect original, Bitmap decoded) {
+		float xScale = decoded.getWidth() / (float) LARGE_SOURCE_SIZE;
+		float yScale = decoded.getHeight() / (float) LARGE_SOURCE_SIZE;
+		int x0 = Math.max(0, Math.min(decoded.getWidth() - 1, Math.round(original.left * xScale)));
+		int y0 = Math.max(0, Math.min(decoded.getHeight() - 1, Math.round(original.top * yScale)));
+		int x1 = Math.max(x0 + 1, Math.min(decoded.getWidth(), Math.round(original.right * xScale)));
+		int y1 = Math.max(y0 + 1, Math.min(decoded.getHeight(), Math.round(original.bottom * yScale)));
+		return new Rect(x0, y0, x1, y1);
+	}
+
+	/**
+	 * Large PNGs are input artwork; the map remains a fixed 64x64 character tile.
+	 * Already-aligned/base files use a full-canvas fit. All other known original
+	 * equipment artwork uses exact measured components, with optional overrides.
+	 */
+	private static Bitmap fitLargeSprite(Bitmap source, String folder, File file, boolean keepCanvas) {
 		Bitmap target = Bitmap.createBitmap(TARGET_SIZE, TARGET_SIZE, Bitmap.Config.ARGB_8888);
 		Canvas canvas = new Canvas(target);
 		Paint paint = new Paint();
 		paint.setFilterBitmap(true);
 		paint.setDither(true);
-		canvas.drawBitmap(source, src, dst, paint);
+		LargeSpritePlacement[] components = FOLDER_BASE.equals(folder) ? null : readPlacements(file);
+		if (components == null && !FOLDER_BASE.equals(folder) && !keepCanvas)
+			components = knownPlacements(folder, file);
+		if (components != null) {
+			for (LargeSpritePlacement component : components)
+				canvas.drawBitmap(source, sampledRect(component.sourceCrop, source),
+						component.destination, paint);
+		} else {
+			Rect src = new Rect(0, 0, source.getWidth(), source.getHeight());
+			Rect dst = new Rect(0, 0, TARGET_SIZE, TARGET_SIZE);
+			if (!FOLDER_BASE.equals(folder) && !keepCanvas) {
+				Rect content = visibleContentBounds(source);
+				if (content != null) src = content;
+				dst = slotBounds(folder);
+			}
+			canvas.drawBitmap(source, src, dst, paint);
+		}
 		return target;
 	}
 
@@ -325,9 +485,13 @@ public final class HeroSpriteHotSwap {
 		long modified = file.lastModified();
 		long length = file.length();
 		boolean keepCanvas = new File(path + ".aligned").isFile();
+		File fitFile = new File(path + ".fit.json");
+		long fitModified = fitFile.isFile() ? fitFile.lastModified() : -1L;
+		long fitLength = fitFile.isFile() ? fitFile.length() : -1L;
 		CachedBitmap cached = bitmapCache.get(path);
 		if (cached != null && cached.modified == modified && cached.length == length
-				&& cached.keepCanvas == keepCanvas) {
+				&& cached.keepCanvas == keepCanvas
+				&& cached.fitModified == fitModified && cached.fitLength == fitLength) {
 			return cached.bitmap;
 		}
 		Bitmap exact = null;
@@ -354,8 +518,7 @@ public final class HeroSpriteHotSwap {
 					else if (width == LEGACY_SIZE)
 						exact = Bitmap.createScaledBitmap(decoded, TARGET_SIZE, TARGET_SIZE, false);
 					else
-						exact = fitLargeSprite(decoded, folder,
-								keepCanvas);
+						exact = fitLargeSprite(decoded, folder, file, keepCanvas);
 				}
 			}
 		} catch (OutOfMemoryError e) {
@@ -371,6 +534,8 @@ public final class HeroSpriteHotSwap {
 		next.length = length;
 		next.bitmap = exact;
 		next.keepCanvas = keepCanvas;
+		next.fitModified = fitModified;
+		next.fitLength = fitLength;
 		bitmapCache.put(path, next);
 		return exact;
 	}
