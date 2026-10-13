@@ -40,6 +40,7 @@ import android.graphics.Paint;
 import android.graphics.Paint.Style;
 import android.graphics.Rect;
 import android.os.Handler;
+import android.os.Build;
 import android.content.SharedPreferences;
 import android.preference.PreferenceManager;
 import android.util.AttributeSet;
@@ -87,6 +88,9 @@ public final class MainView extends SurfaceView
 	private final int[] debugColors = {Color.MAGENTA, Color.BLUE, Color.CYAN, Color.GREEN, Color.YELLOW, Color.RED, Color.WHITE};
 	private final CoordRect p1x1 = new CoordRect(new Coord(), new Size(1,1));
 	private boolean hasSurface = false;
+	// The full-resolution software framebuffer was expensive to redraw during
+	// movement. Hardware canvas keeps the sharp 64px hero without that CPU cost.
+	private boolean preferHardwareCanvas = Build.VERSION.SDK_INT >= 26;
 	
 	//DEBUG
 //	private Coord touchedTile = null;
@@ -191,7 +195,9 @@ public final class MainView extends SurfaceView
 
 		
 		this.scale = Math.max(0.01f, world.tileManager.scale * cameraZoom);
-		this.mPaint.setFilterBitmap(scale != 1);
+		// Avoid transparent/color fringes leaking across the edges of adjacent
+		// map tiles when the camera is at fractional zoom levels.
+		this.mPaint.setFilterBitmap(false);
 		this.scaledTileSize = Math.max(1, Math.round(tileSize * scale));
 		// World-space camera dimensions remain logical 32px tiles, but render to a
 		// native-resolution Surface. Previously a reduced Surface was stretched to
@@ -289,11 +295,13 @@ public final class MainView extends SurfaceView
 	private void redrawArea_(CoordRect area, final List<VisualEffectAnimation> effects) {
 		if (!hasSurface) return;
 
-
 		if (!currentMap.intersects(area)) return;
 		if (!mapViewArea.intersects(area)) return;
 
-		if (shouldRedrawEverything()) {
+		if (shouldRedrawEverything() || preferHardwareCanvas) {
+			// A hardware Surface canvas presents the entire frame. Always redraw
+			// the whole visible map so stale partial regions cannot flash or leave
+			// grid-shaped seams after the camera scrolls.
 			area = mapViewArea;
 		}
 
@@ -310,8 +318,13 @@ public final class MainView extends SurfaceView
 		if (physicalDirty.isEmpty()) return;
 		Canvas c = null;
 		try {
-			c = holder.lockCanvas(physicalDirty);
+			c = lockGameCanvas(physicalDirty);
 			if (c == null) return;
+			if (c.isHardwareAccelerated()) {
+				// Hardware mode redraws the full viewport. Clear the previous frame
+				// before painting so fractional scrolls leave no stale edge pixels.
+				c.drawColor(Color.BLACK);
+			}
 			// lockCanvas sometimes changes redrawRect, when the double-buffer has not been
 			// sufficiently filled beforehand. In those cases, we need to redraw the whole scene.
 			if (area != mapViewArea) {
@@ -390,11 +403,26 @@ public final class MainView extends SurfaceView
 		}
 	}
 
+	/** Prefer GPU-backed Canvas on modern Android; retain API 21-25 fallback. */
+	private Canvas lockGameCanvas(Rect dirty) {
+		if (preferHardwareCanvas) {
+			try {
+				Canvas accelerated = holder.lockHardwareCanvas();
+				if (accelerated != null) return accelerated;
+			} catch (RuntimeException unsupported) {
+				// Some device drivers do not support a hardware Surface canvas.
+			}
+			preferHardwareCanvas = false;
+		}
+		return dirty == null ? holder.lockCanvas() : holder.lockCanvas(dirty);
+	}
+
 	private void clearCanvas() {
 		if (!hasSurface) return;
 		Canvas c = null;
 		try {
-			c = holder.lockCanvas();
+			c = lockGameCanvas(null);
+			if (c == null) return;
 			synchronized (holder) {
 				c.drawColor(Color.BLACK);
 			}
