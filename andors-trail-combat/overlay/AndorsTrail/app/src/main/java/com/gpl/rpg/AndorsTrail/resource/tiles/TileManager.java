@@ -858,7 +858,9 @@ public final class TileManager {
 		if (bitmap.getWidth() != desiredSize || bitmap.getHeight() != desiredSize) {
 			bitmap = Bitmap.createScaledBitmap(bitmap, desiredSize, desiredSize, false);
 		}
-		return new BitmapDrawable(res, bitmap);
+		BitmapDrawable drawable = new BitmapDrawable(res, bitmap);
+		drawable.setFilterBitmap(false); // Native pixel art stays crisp when the inventory preview grows.
+		return drawable;
 	}
 
 	public void setPlayerAppearanceImageView(Resources res, ImageView imageView, Player player, boolean large) {
