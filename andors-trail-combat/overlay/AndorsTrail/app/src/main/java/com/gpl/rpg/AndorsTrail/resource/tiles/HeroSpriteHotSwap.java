@@ -22,6 +22,7 @@ import android.widget.Toast;
 import com.gpl.rpg.AndorsTrail.model.actor.Player;
 import com.gpl.rpg.AndorsTrail.controller.VampirismController;
 import com.gpl.rpg.AndorsTrail.model.item.ItemType;
+import com.gpl.rpg.AndorsTrail.model.item.Inventory;
 
 /**
  * Runtime sprite override loader used by the sprite playground build.
@@ -131,6 +132,7 @@ public final class HeroSpriteHotSwap {
 		}
 		writeReadme(root);
 		write64SpriteGuide(root);
+		writeBaldVampireGuide(root);
 	}
 
 	private static void writeReadme(File root) {
@@ -183,6 +185,27 @@ public final class HeroSpriteHotSwap {
 		} catch (IOException ignored) { }
 	}
 
+	/** New guide is written even when older README files from previous APKs exist. */
+	private static void writeBaldVampireGuide(File root) {
+		File guide = new File(root, "64x64_HEADGEAR_AND_VAMPIRE.txt");
+		if (guide.exists()) return;
+		String text =
+				"Four interchangeable character bases (all transparent 64x64 PNGs):\n" +
+				"Base/Base.png - normal, with hair (no headgear)\n" +
+				"Base/base_bald.png - normal, bald (headgear equipped)\n" +
+				"Base/base_vampire.png - vampire, with hair (no headgear)\n" +
+				"Base/base_vampire_bald.png - vampire, bald (headgear equipped)\n\n" +
+				"The game switches the base automatically when wearing/removing headgear\n" +
+				"or gaining/curing permanent vampirism. Infection alone does not switch it.\n" +
+				"If an optional base is absent, the game falls back to the corresponding\n" +
+				"normal or vampire base. Equipment uses the same aligned 64px layers.\n" +
+				"Footwear/Crude leather boots.png includes trousers.\n" +
+				"The map tile size and camera zoom remain unchanged.\n";
+		try (FileOutputStream out = new FileOutputStream(guide)) {
+			out.write(text.getBytes("UTF-8"));
+		} catch (IOException ignored) { }
+	}
+
 	private static String safeFileName(String value) {
 		if (value == null) return "";
 		return value.replace('/', '_').replace('\\', '_').replace('\0', '_');
@@ -219,22 +242,37 @@ public final class HeroSpriteHotSwap {
 		return resolveNamedFile(folder, type.id);
 	}
 
+	private static boolean hasEquippedHeadgear(Player player) {
+		return player != null && player.inventory != null
+				&& player.inventory.getItemTypeInWearSlot(Inventory.WearSlot.head) != null;
+	}
+
 	private static File resolveBaseFile(Player player) {
-		// The permanent vampirism condition is the only visual transformation trigger.
-		// Infection alone leaves the base unchanged; curing restores the normal base.
-		if (player != null && VampirismController.isVampire(player)) {
-			File vampire = resolveNamedFile(FOLDER_BASE, "base_vampire");
-			if (vampire != null) return vampire;
+		// Headwear suppresses hair underneath the hat; permanent vampirism changes
+		// the character face/skin without replacing or moving any equipment layers.
+		boolean vampire = player != null && VampirismController.isVampire(player);
+		boolean bald = hasEquippedHeadgear(player);
+		if (vampire && bald) {
+			File exact = resolveNamedFile(FOLDER_BASE, "base_vampire_bald");
+			if (exact != null) return exact;
 		}
-		File normal = resolveNamedFile(FOLDER_BASE, "Base");
-		if (normal != null) return normal;
-		// Keep the older hot-swap fallback, but never use the vampire as a normal base.
+		if (vampire) {
+			File exact = resolveNamedFile(FOLDER_BASE, "base_vampire");
+			if (exact != null) return exact;
+		}
+		if (bald) {
+			File exact = resolveNamedFile(FOLDER_BASE, "base_bald");
+			if (exact != null) return exact;
+		}
+		File standard = resolveNamedFile(FOLDER_BASE, "Base");
+		if (standard != null) return standard;
+		// The legacy fallback should never accidentally select a vampire variant.
 		File[] files = getFolder(FOLDER_BASE).listFiles();
 		if (files != null) {
 			for (File candidate : files) {
-				String name = candidate.getName();
-				if (candidate.isFile() && name.toLowerCase(java.util.Locale.ROOT).endsWith(".png")
-						&& !name.equalsIgnoreCase("base_vampire.png")) {
+				String name = candidate.getName().toLowerCase(java.util.Locale.ROOT);
+				if (candidate.isFile() && name.endsWith(".png")
+						&& !name.startsWith("base_vampire") && !name.equals("base_bald.png")) {
 					return candidate;
 				}
 			}
@@ -251,6 +289,7 @@ public final class HeroSpriteHotSwap {
 		if (!isStorageAccessible()) return "off";
 		StringBuilder sb = new StringBuilder();
 		sb.append("V=").append(VampirismController.isVampire(player) ? "1" : "0");
+		sb.append("|Bald=").append(hasEquippedHeadgear(player) ? "1" : "0");
 		sb.append("|B=").append(stamp(resolveBaseFile(player)));
 		ItemType head = player.inventory.getItemTypeInWearSlot(com.gpl.rpg.AndorsTrail.model.item.Inventory.WearSlot.head);
 		ItemType body = player.inventory.getItemTypeInWearSlot(com.gpl.rpg.AndorsTrail.model.item.Inventory.WearSlot.body);
