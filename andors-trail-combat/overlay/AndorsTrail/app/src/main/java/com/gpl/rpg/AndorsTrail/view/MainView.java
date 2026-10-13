@@ -513,7 +513,11 @@ public final class MainView extends SurfaceView
 	
 	private void drawPlayerAppearance(Canvas canvas, int px, int py) {
 		Bitmap bitmap = world.tileManager.getPlayerAppearanceBitmap(getResources(), model.player);
-		if (bitmap != null) canvas.drawBitmap(bitmap, px, py, mPaint);
+		if (bitmap == null) return;
+		// Only the hero bitmap is higher resolution. Its world-space footprint
+		// stays exactly one 32px map tile; do not alter the map tiles or camera.
+		canvas.drawBitmap(bitmap, null,
+				new Rect(px, py, px + tileSize, py + tileSize), mPaint);
 	}
 
 	private void drawPlayerAppearanceFromMapPosition(Canvas canvas, final CoordRect area, final Coord p) {
