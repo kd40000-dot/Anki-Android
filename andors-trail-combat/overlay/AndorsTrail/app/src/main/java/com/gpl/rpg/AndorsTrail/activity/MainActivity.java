@@ -14,6 +14,7 @@ import android.view.View.OnLongClickListener;
 import android.widget.AdapterView;
 import android.widget.AdapterView.OnItemClickListener;
 import android.widget.ListView;
+import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -105,6 +106,20 @@ public final class MainActivity
 		statusview.registerToolboxViews(toolboxview, quickitemview);
 		toolboxview.setFocusReturnView(mainview);
 
+		// Two map-only camera controls. These do not alter density, UI scale,
+		// tile assets, inventory icons, or the hot-swapped hero sprites.
+		TextView zoomIn = (TextView) findViewById(R.id.main_zoom_in);
+		TextView zoomOut = (TextView) findViewById(R.id.main_zoom_out);
+		zoomIn.setOnClickListener(v -> {
+			mainview.adjustCameraZoom(1);
+			updateZoomButtonStates(zoomIn, zoomOut);
+		});
+		zoomOut.setOnClickListener(v -> {
+			mainview.adjustCameraZoom(-1);
+			updateZoomButtonStates(zoomIn, zoomOut);
+		});
+		updateZoomButtonStates(zoomIn, zoomOut);
+
 		// Hide toolbox when mainview gets focus, generally because some other activity closed and
 		// returned control to the playfield.  TODO: Check for touch mode compatibility
 		mainview.setOnFocusChangeListener((v, hasFocus) -> {
@@ -134,11 +149,20 @@ public final class MainActivity
 		quickitemview.setPosition();
 
 		// Define which views are in front of each other.
+		// Zoom controls are over the map, but under dialogs/combat and the status UI.
+		((LinearLayout) findViewById(R.id.main_zoom_controls)).bringToFront();
 		dpad.bringToFront();
 		quickitemview.bringToFront();
 		toolboxview.bringToFront();
 		combatview.bringToFront();
 		statusview.bringToFront();
+	}
+
+	private void updateZoomButtonStates(TextView zoomIn, TextView zoomOut) {
+		zoomIn.setEnabled(mainview.canZoomIn());
+		zoomOut.setEnabled(mainview.canZoomOut());
+		zoomIn.setAlpha(mainview.canZoomIn() ? 1.0f : 0.35f);
+		zoomOut.setAlpha(mainview.canZoomOut() ? 1.0f : 0.35f);
 	}
 
 	@Override
