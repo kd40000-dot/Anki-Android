@@ -20,6 +20,7 @@ import android.provider.Settings;
 import android.widget.Toast;
 
 import com.gpl.rpg.AndorsTrail.model.actor.Player;
+import com.gpl.rpg.AndorsTrail.controller.VampirismController;
 import com.gpl.rpg.AndorsTrail.model.item.ItemType;
 
 /**
@@ -47,7 +48,8 @@ public final class HeroSpriteHotSwap {
 	public static final String FOLDER_FOOTWEAR = "Footwear";
 
 	private static final int REQUEST_STORAGE = 0x4171;
-	private static final int TARGET_SIZE = 32;
+	private static final int LEGACY_SIZE = 32;
+	public static final int TARGET_SIZE = 64;
 	private static final long POLL_INTERVAL_MS = 250L;
 	private static boolean permissionPromptLaunched = false;
 	private static long lastSignaturePoll = 0L;
@@ -128,6 +130,7 @@ public final class HeroSpriteHotSwap {
 			if (!folder.exists()) folder.mkdirs();
 		}
 		writeReadme(root);
+		write64SpriteGuide(root);
 	}
 
 	private static void writeReadme(File root) {
@@ -151,6 +154,32 @@ public final class HeroSpriteHotSwap {
 			FileOutputStream out = new FileOutputStream(readme);
 			out.write(text.getBytes("UTF-8"));
 			out.close();
+		} catch (IOException ignored) { }
+	}
+
+	/** An additional guide is created even when an older 32px README already exists. */
+	private static void write64SpriteGuide(File root) {
+		File guide = new File(root, "64x64_SPRITES.txt");
+		if (guide.exists()) return;
+		String text =
+				"64x64 character sprite hot-swap (vampire build)\n\n" +
+				"Base/Base.png (normal character)\n" +
+				"Base/base_vampire.png (only when full vampirism condition is active)\n" +
+				"Headwear/Fine green hat.png\n" +
+				"Armor/Kid's shirt.png\n" +
+				"Mainhand/Sharp steel rapier.png\n" +
+				"Offhand/Kid's shield.png\n" +
+				"Gloves/Gloves of better grip.png\n" +
+				"Footwear/Crude leather boots.png\n\n" +
+				"Use transparent 64x64 PNGs, with every layer aligned to the SAME 64x64 canvas.\n" +
+				"32x32 PNGs also work: the game enlarges them 2x without smoothing.\n" +
+				"1254x1254 images are NOT accepted.\n" +
+				"Vampirism switches only the base, never the equipment overlay.\n" +
+				"If base_vampire.png is missing, the normal base is used.\n" +
+				"Even though character art is 64px, its logical map footprint remains 32px.\n" +
+				"Hot swaps are detected while the game runs.\n";
+		try (FileOutputStream out = new FileOutputStream(guide)) {
+			out.write(text.getBytes("UTF-8"));
 		} catch (IOException ignored) { }
 	}
 
@@ -190,14 +219,22 @@ public final class HeroSpriteHotSwap {
 		return resolveNamedFile(folder, type.id);
 	}
 
-	private static File resolveBaseFile() {
-		File file = resolveNamedFile(FOLDER_BASE, "Base");
-		if (file != null) return file;
-		// If Base.png is not present, accept the first PNG in Base for faster iteration.
+	private static File resolveBaseFile(Player player) {
+		// The permanent vampirism condition is the only visual transformation trigger.
+		// Infection alone leaves the base unchanged; curing restores the normal base.
+		if (player != null && VampirismController.isVampire(player)) {
+			File vampire = resolveNamedFile(FOLDER_BASE, "base_vampire");
+			if (vampire != null) return vampire;
+		}
+		File normal = resolveNamedFile(FOLDER_BASE, "Base");
+		if (normal != null) return normal;
+		// Keep the older hot-swap fallback, but never use the vampire as a normal base.
 		File[] files = getFolder(FOLDER_BASE).listFiles();
 		if (files != null) {
 			for (File candidate : files) {
-				if (candidate.isFile() && candidate.getName().toLowerCase().endsWith(".png")) {
+				String name = candidate.getName();
+				if (candidate.isFile() && name.toLowerCase(java.util.Locale.ROOT).endsWith(".png")
+						&& !name.equalsIgnoreCase("base_vampire.png")) {
 					return candidate;
 				}
 			}
@@ -213,7 +250,8 @@ public final class HeroSpriteHotSwap {
 	private static String computeActiveSignature(Player player) {
 		if (!isStorageAccessible()) return "off";
 		StringBuilder sb = new StringBuilder();
-		sb.append("B=").append(stamp(resolveBaseFile()));
+		sb.append("V=").append(VampirismController.isVampire(player) ? "1" : "0");
+		sb.append("|B=").append(stamp(resolveBaseFile(player)));
 		ItemType head = player.inventory.getItemTypeInWearSlot(com.gpl.rpg.AndorsTrail.model.item.Inventory.WearSlot.head);
 		ItemType body = player.inventory.getItemTypeInWearSlot(com.gpl.rpg.AndorsTrail.model.item.Inventory.WearSlot.body);
 		ItemType weapon = player.inventory.getItemTypeInWearSlot(com.gpl.rpg.AndorsTrail.model.item.Inventory.WearSlot.weapon);
@@ -238,6 +276,10 @@ public final class HeroSpriteHotSwap {
 		return lastActiveSignature;
 	}
 
+	/**
+	 * Accept only exact 32x32 or 64x64 PNG artwork. We composite at 64px,
+	 * independent of the game's original 32px logical map tile dimensions.
+	 */
 	private static synchronized Bitmap loadFile(File file) {
 		if (file == null || !file.isFile()) return null;
 		String path = file.getAbsolutePath();
@@ -247,11 +289,31 @@ public final class HeroSpriteHotSwap {
 		if (cached != null && cached.modified == modified && cached.length == length) {
 			return cached.bitmap;
 		}
-		BitmapFactory.Options options = new BitmapFactory.Options();
-		options.inScaled = false;
-		Bitmap decoded = BitmapFactory.decodeFile(path, options);
-		Bitmap exact = decoded != null && decoded.getWidth() == TARGET_SIZE && decoded.getHeight() == TARGET_SIZE
-				? decoded : null;
+		Bitmap exact = null;
+		Bitmap decoded = null;
+		try {
+			BitmapFactory.Options bounds = new BitmapFactory.Options();
+			bounds.inJustDecodeBounds = true;
+			bounds.inScaled = false;
+			BitmapFactory.decodeFile(path, bounds);
+			int width = bounds.outWidth;
+			if (width == bounds.outHeight && (width == TARGET_SIZE || width == LEGACY_SIZE)) {
+				BitmapFactory.Options options = new BitmapFactory.Options();
+				options.inScaled = false;
+				options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+				decoded = BitmapFactory.decodeFile(path, options);
+				if (decoded != null) {
+					if (width == TARGET_SIZE) exact = decoded;
+					else exact = Bitmap.createScaledBitmap(decoded, TARGET_SIZE, TARGET_SIZE, false);
+				}
+			}
+		} catch (RuntimeException ignored) {
+			// Invalid user-provided files must not crash the game.
+		} catch (OutOfMemoryError ignored) {
+			// Keep rendering the remaining equipped items if a decode fails.
+		} finally {
+			if (decoded != null && decoded != exact && !decoded.isRecycled()) decoded.recycle();
+		}
 		CachedBitmap next = new CachedBitmap();
 		next.modified = modified;
 		next.length = length;
@@ -260,9 +322,9 @@ public final class HeroSpriteHotSwap {
 		return exact;
 	}
 
-	public static Bitmap loadBaseSprite() {
+	public static Bitmap loadBaseSprite(Player player) {
 		if (!isStorageAccessible()) return null;
-		return loadFile(resolveBaseFile());
+		return loadFile(resolveBaseFile(player));
 	}
 
 	public static Bitmap loadItemSprite(String folder, ItemType type, Player player) {
