@@ -193,7 +193,9 @@ public final class MainView extends SurfaceView
 		this.scale = Math.max(0.01f, world.tileManager.scale * cameraZoom);
 		this.mPaint.setFilterBitmap(scale != 1);
 		this.scaledTileSize = Math.max(1, Math.round(tileSize * scale));
-		// The SurfaceView stretches this world-pixel buffer to the view's bounds.
+		// World-space camera dimensions remain logical 32px tiles, but render to a
+		// native-resolution Surface. Previously a reduced Surface was stretched to
+		// the view, permanently discarding 64px hero details before zooming.
 		this.surfaceSize = new Size(Math.max(1, (int) (getWidth() / scale)),
 				Math.max(1, (int) (getHeight() / scale)));
 		this.screenSizeTileCount = new Size(
@@ -201,8 +203,11 @@ public final class MainView extends SurfaceView
 				Math.max(1, (int) (getHeight() / (tileSize * scale)))
 		);
 		
-		if (sh.getSurfaceFrame().right != surfaceSize.width || sh.getSurfaceFrame().bottom != surfaceSize.height) {
-			sh.setFixedSize(surfaceSize.width, surfaceSize.height);
+		// Do not use logical surfaceSize as the actual framebuffer dimensions!
+		// Draw at the device's native view resolution; only the Canvas camera
+		// transform enlarges map tiles. This retains native 64x64 character detail.
+		if (sh.getSurfaceFrame().right != getWidth() || sh.getSurfaceFrame().bottom != getHeight()) {
+			sh.setFixedSize(getWidth(), getHeight());
 		}
 		
 		if (model.currentMaps.map != null) {
@@ -293,14 +298,24 @@ public final class MainView extends SurfaceView
 		}
 
 		calculateRedrawRect(area);
-		redrawRect.intersect(redrawClip);
+		if (!redrawRect.intersect(redrawClip)) return;
+		// The rectangle above is in logical world pixels. lockCanvas takes
+		// *physical* framebuffer pixels after camera zoom, so transform it first.
+		// Expand by two pixels to avoid edges during fractional zoom levels.
+		Rect physicalDirty = new Rect(
+				Math.max(0, (int) Math.floor(redrawRect.left * scale) - 2),
+				Math.max(0, (int) Math.floor(redrawRect.top * scale) - 2),
+				Math.min(getWidth(), (int) Math.ceil(redrawRect.right * scale) + 2),
+				Math.min(getHeight(), (int) Math.ceil(redrawRect.bottom * scale) + 2));
+		if (physicalDirty.isEmpty()) return;
 		Canvas c = null;
 		try {
-			c = holder.lockCanvas(redrawRect);
+			c = holder.lockCanvas(physicalDirty);
+			if (c == null) return;
 			// lockCanvas sometimes changes redrawRect, when the double-buffer has not been
 			// sufficiently filled beforehand. In those cases, we need to redraw the whole scene.
 			if (area != mapViewArea) {
-				if (isRedrawRectWholeScreen(redrawRect)) {
+				if (isRedrawRectWholeScreen(physicalDirty)) {
 					area = mapViewArea;
 				}
 			}
@@ -317,10 +332,16 @@ public final class MainView extends SurfaceView
 					yScroll = (int) (tileSize - (tileSize * (System.currentTimeMillis() - scrollStartTime) / SCROLL_DURATION));
 					yScroll = Math.max(0, Math.min(tileSize, yScroll)) * scrollVector.y;
 				}
+				int save = c.save();
+				// All map/world coordinates remain the original logical 32px grid.
+				// Scaling the physical Canvas (rather than a 32px offscreen buffer)
+				// allows a 64px avatar to rasterize at 64+ *real* screen pixels.
+				c.scale(scale, scale);
 				c.clipRect(redrawClip);
 				c.translate(screenOffset.x + xScroll, screenOffset.y + yScroll);
 				doDrawRect(c, area);
 				renderEffects(c, effects);
+				c.restoreToCount(save);
 			} }
 		} finally {
 			if (c != null) holder.unlockCanvasAndPost(c);
@@ -342,8 +363,8 @@ public final class MainView extends SurfaceView
 	private boolean isRedrawRectWholeScreen(Rect redrawRect) {
 //		if (redrawRect.width() < mapViewArea.size.width * scaledTileSize) return false;
 //		if (redrawRect.height() < mapViewArea.size.height * scaledTileSize) return false;
-		if (redrawRect.width() < mapViewArea.size.width * tileSize) return false;
-		if (redrawRect.height() < mapViewArea.size.height * tileSize) return false;
+		if (redrawRect.width() < mapViewArea.size.width * tileSize * scale) return false;
+		if (redrawRect.height() < mapViewArea.size.height * tileSize * scale) return false;
 		return true;
 	}
 
@@ -556,10 +577,10 @@ public final class MainView extends SurfaceView
 	private void drawPlayerAppearance(Canvas canvas, int px, int py) {
 		Bitmap bitmap = world.tileManager.getPlayerAppearanceBitmap(getResources(), model.player);
 		if (bitmap == null) return;
-		// Only the hero bitmap is higher resolution. Its world-space footprint
-		// stays exactly one 32px map tile; do not alter the map tiles or camera.
-		// Only the character uses sharp nearest-neighbor minification; preserve
-		// the map's existing filtering and scale for all other world sprites.
+		// The 64x64 hero bitmap occupies exactly one logical 32px tile.
+		// Unlike rendering to the old reduced Surface, the real-size Canvas
+		// retains original pixels at 2x zoom and avoids blurry 32px upscaling.
+		// Keep the hero sharp; preserve map texture filtering for other sprites.
 		boolean oldFiltering = mPaint.isFilterBitmap();
 		mPaint.setFilterBitmap(false);
 		canvas.drawBitmap(bitmap, null,
