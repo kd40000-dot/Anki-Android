@@ -516,8 +516,13 @@ public final class MainView extends SurfaceView
 		if (bitmap == null) return;
 		// Only the hero bitmap is higher resolution. Its world-space footprint
 		// stays exactly one 32px map tile; do not alter the map tiles or camera.
+		// Only the character uses sharp nearest-neighbor minification; preserve
+		// the map's existing filtering and scale for all other world sprites.
+		boolean oldFiltering = mPaint.isFilterBitmap();
+		mPaint.setFilterBitmap(false);
 		canvas.drawBitmap(bitmap, null,
 				new Rect(px, py, px + tileSize, py + tileSize), mPaint);
+		mPaint.setFilterBitmap(oldFiltering);
 	}
 
 	private void drawPlayerAppearanceFromMapPosition(Canvas canvas, final CoordRect area, final Coord p) {
