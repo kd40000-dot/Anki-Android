@@ -40,6 +40,8 @@ import android.graphics.Paint;
 import android.graphics.Paint.Style;
 import android.graphics.Rect;
 import android.os.Handler;
+import android.content.SharedPreferences;
+import android.preference.PreferenceManager;
 import android.util.AttributeSet;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -59,6 +61,13 @@ public final class MainView extends SurfaceView
 	private final int tileSize;
 	private float scale;
 	private int scaledTileSize;
+	// Camera-only zoom. The game's logical tile size and sprite textures never change.
+	private static final String CAMERA_ZOOM_KEY = "map_button_camera_zoom";
+	private static final float MIN_CAMERA_ZOOM = 0.75f;
+	private static final float MAX_CAMERA_ZOOM = 2.0f;
+	private static final float CAMERA_ZOOM_STEP = 0.25f;
+	private final SharedPreferences cameraZoomPrefs;
+	private float cameraZoom;
 
 	private Size screenSizeTileCount = null;
 	private final Coord screenOffset = new Coord(); // pixel offset where the image begins
@@ -122,6 +131,8 @@ public final class MainView extends SurfaceView
 		this.tileSize = world.tileManager.tileSize;
 		this.inputController = controllers.inputController;
 		this.preferences = app.getPreferences();
+		this.cameraZoomPrefs = PreferenceManager.getDefaultSharedPreferences(context.getApplicationContext());
+		this.cameraZoom = clampCameraZoom(cameraZoomPrefs.getFloat(CAMERA_ZOOM_KEY, 1.0f));
 
 		alternateColorFilterPaint.setStyle(Style.FILL);
 		
@@ -149,20 +160,46 @@ public final class MainView extends SurfaceView
 		return inputController.onKeyboardAction(getContext(), keyEvent, canAcceptInput()) ||  super.onKeyUp(keyCode, keyEvent);
 	}
 
+	private static float clampCameraZoom(float value) {
+		return Math.max(MIN_CAMERA_ZOOM, Math.min(MAX_CAMERA_ZOOM, value));
+	}
+
+	public boolean canZoomIn() {
+		return cameraZoom < MAX_CAMERA_ZOOM - 0.001f;
+	}
+
+	public boolean canZoomOut() {
+		return cameraZoom > MIN_CAMERA_ZOOM + 0.001f;
+	}
+
+	/** Called only from the small + and - buttons on the gameplay activity. */
+	public void adjustCameraZoom(int steps) {
+		if (steps == 0) return;
+		float next = clampCameraZoom(cameraZoom + steps * CAMERA_ZOOM_STEP);
+		if (Math.abs(next - cameraZoom) < 0.001f) return;
+		cameraZoom = next;
+		cameraZoomPrefs.edit().putFloat(CAMERA_ZOOM_KEY, next).apply();
+		// Rebuild the camera viewport and touch mapping, not the tileset.
+		if (hasSurface && getWidth() > 0 && getHeight() > 0) {
+			surfaceChanged(holder, 0, getWidth(), getHeight());
+		}
+	}
+
 	@Override
 	public void surfaceChanged(SurfaceHolder sh, int format, int w, int h) {
 		if (w <= 0 || h <= 0) return;
 
 		
-		this.scale = world.tileManager.scale;
+		this.scale = Math.max(0.01f, world.tileManager.scale * cameraZoom);
 		this.mPaint.setFilterBitmap(scale != 1);
-		this.scaledTileSize = world.tileManager.viewTileSize;
-//		this.surfaceSize = new Size(w, h);
-		this.surfaceSize = new Size((int) (getWidth() / scale), (int) (getHeight() / scale));
+		this.scaledTileSize = Math.max(1, Math.round(tileSize * scale));
+		// The SurfaceView stretches this world-pixel buffer to the view's bounds.
+		this.surfaceSize = new Size(Math.max(1, (int) (getWidth() / scale)),
+				Math.max(1, (int) (getHeight() / scale)));
 		this.screenSizeTileCount = new Size(
-				 getWidth()  / scaledTileSize
-				,getHeight() / scaledTileSize
-			);
+				Math.max(1, (int) (getWidth() / (tileSize * scale))),
+				Math.max(1, (int) (getHeight() / (tileSize * scale)))
+		);
 		
 		if (sh.getSurfaceFrame().right != surfaceSize.width || sh.getSurfaceFrame().bottom != surfaceSize.height) {
 			sh.setFixedSize(surfaceSize.width, surfaceSize.height);
@@ -193,8 +230,13 @@ public final class MainView extends SurfaceView
 		switch (event.getAction()) {
 		case MotionEvent.ACTION_DOWN:
 		case MotionEvent.ACTION_MOVE:
-			final int tile_x = (int) Math.floor(((int)event.getX() - screenOffset.x * scale) / scaledTileSize) + mapTopLeft.x;
-			final int tile_y = (int) Math.floor(((int)event.getY() - screenOffset.y * scale) / scaledTileSize) + mapTopLeft.y;
+			// Touch coordinates use the same float camera transform as the world
+			// surface, including its centered offset and changed viewport.
+			final float deviceTileSize = tileSize * scale;
+			final int tile_x = (int) Math.floor((event.getX() - screenOffset.x * scale)
+					/ deviceTileSize) + mapTopLeft.x;
+			final int tile_y = (int) Math.floor((event.getY() - screenOffset.y * scale)
+					/ deviceTileSize) + mapTopLeft.y;
 //			touchedTile = new Coord(tile_x, tile_y);
 			if (inputController.onTouchedTile(tile_x, tile_y)) return true;
 			break;
