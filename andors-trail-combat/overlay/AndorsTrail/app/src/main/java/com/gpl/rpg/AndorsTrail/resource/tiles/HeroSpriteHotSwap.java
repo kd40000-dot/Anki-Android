@@ -12,6 +12,9 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Rect;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -49,6 +52,7 @@ public final class HeroSpriteHotSwap {
 	private static final int REQUEST_STORAGE = 0x4171;
 	private static final int LEGACY_SIZE = 32;
 	public static final int TARGET_SIZE = 64;
+	private static final int LARGE_SOURCE_SIZE = 1254;
 	private static final long POLL_INTERVAL_MS = 250L;
 	private static boolean permissionPromptLaunched = false;
 	private static long lastSignaturePoll = 0L;
@@ -59,6 +63,7 @@ public final class HeroSpriteHotSwap {
 		long modified;
 		long length;
 		Bitmap bitmap;
+		boolean keepCanvas;
 	}
 
 	private HeroSpriteHotSwap() { }
@@ -129,6 +134,7 @@ public final class HeroSpriteHotSwap {
 			if (!folder.exists()) folder.mkdirs();
 		}
 		writeReadme(root);
+		writeLargeSpriteGuide(root);
 	}
 
 	private static void writeReadme(File root) {
@@ -137,7 +143,8 @@ public final class HeroSpriteHotSwap {
 		String text =
 				"Andor's Trail sprite hot-swap folder\n\n" +
 				"Use transparent 64x64 PNG files for full detail. Legacy 32x32 sprites are upscaled exactly 2x with nearest-neighbor.\n" +
-				"Other dimensions are ignored. Every sprite layer must use the same character pose and alignment.\n\n" +
+				"1254x1254 PNG images are also supported and automatically fitted to their equipment slot.\n" +
+				"Other dimensions are ignored. Every 32x32/64x64 sprite layer must use the same pose and alignment.\n\n" +
 				"Base/Base.png\n" +
 				"Headwear/<exact in-game item name>.png\n" +
 				"Armor/<exact in-game item name>.png\n" +
@@ -152,6 +159,26 @@ public final class HeroSpriteHotSwap {
 			FileOutputStream out = new FileOutputStream(readme);
 			out.write(text.getBytes("UTF-8"));
 			out.close();
+		} catch (IOException ignored) { }
+	}
+
+	private static void writeLargeSpriteGuide(File root) {
+		File guide = new File(root, "1254_SPRITES.txt");
+		if (guide.exists()) return;
+		String text =
+				"Large artwork support (Andor's Trail)\n\n" +
+				"Keep your original transparent 1254x1254 PNG files; do not resize them.\n" +
+				"Place them in the existing Base, Armor, Headwear, Mainhand, Offhand, Gloves, or Footwear folders.\n" +
+				"Base/Base.png is the character's base. Equipment filenames must match in-game names.\n\n" +
+				"1254x1254 images are safely sampled and automatically fitted to their corresponding equipment region.\n" +
+				"The game renders a 64x64 map tile; the full 1254x1254 file is never held in the sprite cache.\n" +
+				"32x32 and 64x64 PNGs still work and retain their exact original alignment.\n\n" +
+				"For a 1254x1254 layer already positioned on the complete character canvas,\n" +
+				"create an empty companion file named exactly '<name>.png.aligned' to disable automatic slot fitting.\n" +
+				"Example: Armor/Kid's shirt.png.aligned\n" +
+				"All equipment is composited over the same fixed 64x64 render canvas.\n";
+		try (FileOutputStream out = new FileOutputStream(guide)) {
+			out.write(text.getBytes("UTF-8"));
 		} catch (IOException ignored) { }
 	}
 
@@ -208,7 +235,9 @@ public final class HeroSpriteHotSwap {
 
 	private static String stamp(File file) {
 		if (file == null || !file.isFile()) return "-";
-		return file.getAbsolutePath() + ":" + file.lastModified() + ":" + file.length();
+		File aligned = new File(file.getAbsolutePath() + ".aligned");
+		return file.getAbsolutePath() + ":" + file.lastModified() + ":" + file.length()
+				+ (aligned.isFile() ? ":aligned" : ":autofit");
 	}
 
 	private static String computeActiveSignature(Player player) {
@@ -239,40 +268,120 @@ public final class HeroSpriteHotSwap {
 		return lastActiveSignature;
 	}
 
-	private static synchronized Bitmap loadFile(File file) {
+	/**
+	 * 1254px inputs are source artwork, not 1254px world tiles.
+	 * Sample them before decoding and rasterize each layer on the 64px player canvas.
+	 * This prevents large PNGs from inflating memory usage or changing map geometry.
+	 */
+	private static Bitmap fitLargeSprite(Bitmap source, String folder, boolean keepCanvas) {
+		Rect src = new Rect(0, 0, source.getWidth(), source.getHeight());
+		Rect dst = new Rect(0, 0, TARGET_SIZE, TARGET_SIZE);
+		if (!FOLDER_BASE.equals(folder) && !keepCanvas) {
+			Rect content = visibleContentBounds(source);
+			if (content != null) src = content;
+			dst = slotBounds(folder);
+		}
+		Bitmap target = Bitmap.createBitmap(TARGET_SIZE, TARGET_SIZE, Bitmap.Config.ARGB_8888);
+		Canvas canvas = new Canvas(target);
+		Paint paint = new Paint();
+		paint.setFilterBitmap(true);
+		paint.setDither(true);
+		canvas.drawBitmap(source, src, dst, paint);
+		return target;
+	}
+
+	/** Locate visible pixels of an isolated item, ignoring near-transparent fringe. */
+	private static Rect visibleContentBounds(Bitmap source) {
+		int width = source.getWidth(), height = source.getHeight();
+		int[] pixels = new int[width * height];
+		source.getPixels(pixels, 0, width, 0, 0, width, height);
+		int minX = width, minY = height, maxX = -1, maxY = -1;
+		for (int y = 0; y < height; y++) {
+			for (int x = 0; x < width; x++) {
+				if ((pixels[y * width + x] >>> 24) < 12) continue;
+				if (x < minX) minX = x;
+				if (x > maxX) maxX = x;
+				if (y < minY) minY = y;
+				if (y > maxY) maxY = y;
+			}
+		}
+		return maxX < 0 ? null : new Rect(minX, minY, maxX + 1, maxY + 1);
+	}
+
+	/** Default placement of large, standalone equipment art on the original hero pose. */
+	private static Rect slotBounds(String folder) {
+		if (FOLDER_HEADWEAR.equals(folder)) return new Rect(15, 3, 50, 23);
+		if (FOLDER_ARMOR.equals(folder)) return new Rect(12, 27, 52, 49);
+		if (FOLDER_GLOVES.equals(folder)) return new Rect(4, 32, 60, 47);
+		if (FOLDER_FOOTWEAR.equals(folder)) return new Rect(11, 43, 53, 63);
+		if (FOLDER_OFFHAND.equals(folder)) return new Rect(38, 29, 63, 54);
+		if (FOLDER_MAINHAND.equals(folder)) return new Rect(0, 10, 28, 47);
+		return new Rect(0, 0, TARGET_SIZE, TARGET_SIZE);
+	}
+
+	private static synchronized Bitmap loadFile(File file, String folder) {
 		if (file == null || !file.isFile()) return null;
 		String path = file.getAbsolutePath();
 		long modified = file.lastModified();
 		long length = file.length();
+		boolean keepCanvas = new File(path + ".aligned").isFile();
 		CachedBitmap cached = bitmapCache.get(path);
-		if (cached != null && cached.modified == modified && cached.length == length) {
+		if (cached != null && cached.modified == modified && cached.length == length
+				&& cached.keepCanvas == keepCanvas) {
 			return cached.bitmap;
 		}
-		BitmapFactory.Options options = new BitmapFactory.Options();
-		options.inScaled = false;
-		Bitmap decoded = BitmapFactory.decodeFile(path, options);
 		Bitmap exact = null;
-		if (decoded != null && decoded.getWidth() == TARGET_SIZE && decoded.getHeight() == TARGET_SIZE) {
-			exact = decoded;
-		} else if (decoded != null && decoded.getWidth() == LEGACY_SIZE && decoded.getHeight() == LEGACY_SIZE) {
-			exact = Bitmap.createScaledBitmap(decoded, TARGET_SIZE, TARGET_SIZE, false);
-			decoded.recycle();
+		Bitmap decoded = null;
+		try {
+			BitmapFactory.Options bounds = new BitmapFactory.Options();
+			bounds.inJustDecodeBounds = true;
+			bounds.inScaled = false;
+			BitmapFactory.decodeFile(path, bounds);
+			int width = bounds.outWidth, height = bounds.outHeight;
+			boolean validSquare = width == height
+					&& (width == LEGACY_SIZE || width == TARGET_SIZE || width == LARGE_SOURCE_SIZE);
+			if (validSquare) {
+				BitmapFactory.Options options = new BitmapFactory.Options();
+				options.inScaled = false;
+				options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+				if (width == LARGE_SOURCE_SIZE) {
+					// Decode around 157x157 rather than allocating a full 1254x1254 bitmap.
+					options.inSampleSize = 8;
+				}
+				decoded = BitmapFactory.decodeFile(path, options);
+				if (decoded != null) {
+					if (width == TARGET_SIZE) exact = decoded;
+					else if (width == LEGACY_SIZE)
+						exact = Bitmap.createScaledBitmap(decoded, TARGET_SIZE, TARGET_SIZE, false);
+					else
+						exact = fitLargeSprite(decoded, folder,
+								keepCanvas);
+				}
+			}
+		} catch (OutOfMemoryError e) {
+			// Corrupt/oversized user sprites must never crash the game.
+			exact = null;
+		} catch (RuntimeException e) {
+			exact = null;
+		} finally {
+			if (decoded != null && decoded != exact && !decoded.isRecycled()) decoded.recycle();
 		}
 		CachedBitmap next = new CachedBitmap();
 		next.modified = modified;
 		next.length = length;
 		next.bitmap = exact;
+		next.keepCanvas = keepCanvas;
 		bitmapCache.put(path, next);
 		return exact;
 	}
 
 	public static Bitmap loadBaseSprite() {
 		if (!isStorageAccessible()) return null;
-		return loadFile(resolveBaseFile());
+		return loadFile(resolveBaseFile(), FOLDER_BASE);
 	}
 
 	public static Bitmap loadItemSprite(String folder, ItemType type, Player player) {
 		if (!isStorageAccessible() || type == null) return null;
-		return loadFile(resolveItemFile(folder, type, player));
+		return loadFile(resolveItemFile(folder, type, player), folder);
 	}
 }
