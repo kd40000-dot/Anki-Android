@@ -82,6 +82,7 @@ public final class MainActivity
 	//private ContextMenuInfo lastSelectedMenu = null;
 	private OnLongClickListener quickButtonLongClickListener = null;
 	private boolean deferredQuicksave = false;
+	private boolean modelListenersSubscribed = false;
 	private boolean activityIsResumed = false;
 	private int resumeRequestGeneration = 0;
 
@@ -266,6 +267,9 @@ public final class MainActivity
 			finish();
 			return;
 		}
+		// onStart may have returned early while scene resources were loading.
+		// Reattach the render/movement listeners before restoring gameplay input.
+		subscribeToModelChanges();
 		controllers.gameRoundController.onMainActivityResumed();
 		// If a map transition delayed the last quicksave, flush it once ready.
 		saveDeferredQuicksaveIfNeeded();
@@ -300,6 +304,8 @@ public final class MainActivity
 	}
 
 	private void unsubscribeFromModel() {
+		if (!modelListenersSubscribed) return;
+		modelListenersSubscribed = false;
 		activeConditions.unsubscribe();
 		combatview.unsubscribe();
 		mainview.unsubscribe();
@@ -314,6 +320,8 @@ public final class MainActivity
 	}
 
 	private void subscribeToModelChanges() {
+		if (modelListenersSubscribed) return;
+		modelListenersSubscribed = true;
 		controllers.mapController.worldEventListeners.add(this);
 		controllers.combatController.combatTurnListeners.add(this);
 		controllers.combatController.combatActionListeners.add(this);
