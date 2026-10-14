@@ -49,6 +49,7 @@ import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
+import android.widget.Toast;
 
 public final class MainView extends SurfaceView
 	implements SurfaceHolder.Callback,
@@ -90,6 +91,7 @@ public final class MainView extends SurfaceView
 	private final CoordRect p1x1 = new CoordRect(new Coord(), new Size(1,1));
 	private boolean hasSurface = false;
 	private boolean loggedBlockedMapTap = false;
+	private long lastBlockedTapNoticeTime = 0L;
 	// The full-resolution software framebuffer was expensive to redraw during
 	// movement. Hardware canvas keeps the sharp 64px hero without that CPU cost.
 	private boolean preferHardwareCanvas = Build.VERSION.SDK_INT >= 26;
@@ -242,15 +244,20 @@ public final class MainView extends SurfaceView
 	@Override
 	public boolean onTouchEvent(MotionEvent event) {
 		if (!canAcceptInput()) {
-			if (event.getActionMasked() == MotionEvent.ACTION_DOWN && !loggedBlockedMapTap) {
-				// A visible inventory or zoom button does not guarantee the map
-				// Surface and game-round controller are both ready to accept taps.
-				// Leave a single diagnostic in logcat instead of silently failing.
-				L.warn("Map touch ignored: mainActivityVisible="
-						+ model.uiSelections.isMainActivityVisible
-						+ ", surfaceCreated=" + hasSurface
-						+ ", surfaceValid=" + holder.getSurface().isValid());
-				loggedBlockedMapTap = true;
+			if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+				String explanation = !hasSurface ? "map surface not ready"
+						: controllers.gameRoundController.getMovementBlockReason();
+				if (!loggedBlockedMapTap) {
+					L.warn("Map touch ignored: " + explanation
+							+ ", surfaceValid=" + holder.getSurface().isValid());
+					loggedBlockedMapTap = true;
+				}
+				long now = System.currentTimeMillis();
+				if (now - lastBlockedTapNoticeTime > 6000) {
+					lastBlockedTapNoticeTime = now;
+					Toast.makeText(getContext(), "Map movement blocked: "
+							+ explanation, Toast.LENGTH_LONG).show();
+				}
 			}
 			return true;
 		}
