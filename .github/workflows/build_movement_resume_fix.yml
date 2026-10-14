@@ -1,4 +1,5 @@
 name: Build Movement Resume Fix APK
+# Includes delayed listener registration for asynchronous scene startup.
 
 on:
   push:
