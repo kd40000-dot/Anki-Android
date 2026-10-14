@@ -31,6 +31,7 @@ import com.gpl.rpg.AndorsTrail.resource.tiles.TileManager;
 import com.gpl.rpg.AndorsTrail.util.Coord;
 import com.gpl.rpg.AndorsTrail.util.CoordRect;
 import com.gpl.rpg.AndorsTrail.util.Size;
+import com.gpl.rpg.AndorsTrail.util.L;
 
 import android.content.Context;
 import android.graphics.Bitmap;
@@ -88,6 +89,7 @@ public final class MainView extends SurfaceView
 	private final int[] debugColors = {Color.MAGENTA, Color.BLUE, Color.CYAN, Color.GREEN, Color.YELLOW, Color.RED, Color.WHITE};
 	private final CoordRect p1x1 = new CoordRect(new Coord(), new Size(1,1));
 	private boolean hasSurface = false;
+	private boolean loggedBlockedMapTap = false;
 	// The full-resolution software framebuffer was expensive to redraw during
 	// movement. Hardware canvas keeps the sharp 64px hero without that CPU cost.
 	private boolean preferHardwareCanvas = Build.VERSION.SDK_INT >= 26;
@@ -226,17 +228,33 @@ public final class MainView extends SurfaceView
 	@Override
 	public void surfaceCreated(SurfaceHolder sh) {
 		hasSurface = true;
+		loggedBlockedMapTap = false;
 	}
 
 	@Override
 	public void surfaceDestroyed(SurfaceHolder sh) {
 		hasSurface = false;
+		// Avoid keeping stale movement active when Android recreates the Surface.
+		inputController.onTouchCancel();
 		movingSpritesRedrawTick.stop();
 	}
 
 	@Override
 	public boolean onTouchEvent(MotionEvent event) {
-		if (!canAcceptInput()) return true;
+		if (!canAcceptInput()) {
+			if (event.getActionMasked() == MotionEvent.ACTION_DOWN && !loggedBlockedMapTap) {
+				// A visible inventory or zoom button does not guarantee the map
+				// Surface and game-round controller are both ready to accept taps.
+				// Leave a single diagnostic in logcat instead of silently failing.
+				L.warn("Map touch ignored: mainActivityVisible="
+						+ model.uiSelections.isMainActivityVisible
+						+ ", surfaceCreated=" + hasSurface
+						+ ", surfaceValid=" + holder.getSurface().isValid());
+				loggedBlockedMapTap = true;
+			}
+			return true;
+		}
+		loggedBlockedMapTap = false;
 
 		switch (event.getAction()) {
 		case MotionEvent.ACTION_DOWN:
