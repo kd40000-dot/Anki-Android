@@ -161,7 +161,11 @@ public final class GameRoundController implements TimedMessageTask.Callback {
 	 * such as when the user switches to another app or the device goes to sleep.
 	 */
 	public void onMainActivityPaused() {
-		acquirePause(PauseReason.ACTIVITY_HIDDEN);
+		// Android may deliver several pause/resume cycles around activity or
+		// surface recreation. Only a real visibility transition adds this reason.
+		if (!isPausedFor(PauseReason.ACTIVITY_HIDDEN)) {
+			acquirePause(PauseReason.ACTIVITY_HIDDEN);
+		}
 	}
 
 	/**
@@ -169,7 +173,27 @@ public final class GameRoundController implements TimedMessageTask.Callback {
 	 * is returning to an in-progress combat session.
 	 */
 	public void onMainActivityResumed() {
-		releasePause(PauseReason.ACTIVITY_HIDDEN);
+		if (isPausedFor(PauseReason.ACTIVITY_HIDDEN)) {
+			releasePause(PauseReason.ACTIVITY_HIDDEN);
+		} else {
+			// A resumed activity must resynchronize the derived input visibility,
+			// even when the lifecycle callback arrives more than once.
+			updateTimerState();
+		}
+	}
+
+	/** Human-readable diagnostic for map/D-pad taps that cannot start movement. */
+	public String getMovementBlockReason() {
+		if (!hasLoadedModel()) return "game is still loading";
+		if (hasPauseReasons()) return "pause reasons " + activePauses.toString();
+		if (world.model.uiSelections.isInCombat) {
+			return world.model.uiSelections.isPlayersCombatTurn
+					? "combat turn active" : "waiting for combat turn";
+		}
+		if (!world.model.uiSelections.isMainActivityVisible) {
+			return "gameplay visibility not resumed";
+		}
+		return "movement handler not responding";
 	}
 
 	/**
