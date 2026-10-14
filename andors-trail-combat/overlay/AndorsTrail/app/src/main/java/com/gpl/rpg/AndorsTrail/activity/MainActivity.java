@@ -82,6 +82,8 @@ public final class MainActivity
 	//private ContextMenuInfo lastSelectedMenu = null;
 	private OnLongClickListener quickButtonLongClickListener = null;
 	private boolean deferredQuicksave = false;
+	private boolean activityIsResumed = false;
+	private int resumeRequestGeneration = 0;
 
 	@Override
 	public void onCreate(Bundle savedInstanceState) {
@@ -228,6 +230,8 @@ public final class MainActivity
 
 	@Override
 	protected void onPause() {
+		activityIsResumed = false;
+		++resumeRequestGeneration; // Cancel any readiness retry from an older resume.
 		super.onPause();
 		controllers.gameRoundController.onMainActivityPaused();
 		controllers.movementController.stopMovement();
@@ -241,19 +245,34 @@ public final class MainActivity
 	@Override
 	protected void onResume() {
 		super.onResume();
-		if (!AndorsTrailApplication.getApplicationFromActivity(this).getWorldSetup().isSceneReady) return;
+		activityIsResumed = true;
+		resumeWhenSceneReady(++resumeRequestGeneration);
+	}
 
-		if (world.model.statistics.isDead()) this.finish();
-		else {
-			controllers.gameRoundController.onMainActivityResumed();
-			// It's possible the pause() quicksave was deferred because the map was in transition.  If
-			// so, we do it now so the new map is saved.
-			saveDeferredQuicksaveIfNeeded();
-			if (world.tileManager.refreshPlayerAppearanceIfChanged(getResources(), world)) {
-				mainview.invalidate();
-			}
-			updateStatus();
+	/**
+	 * Scene loading and Android lifecycle resumes can race. Previously an
+	 * onResume arriving before isSceneReady would return permanently, leaving
+	 * ACTIVITY_HIDDEN active while inventory and zoom still worked. Finish
+	 * resuming as soon as the scene becomes ready, unless the activity pauses.
+	 */
+	private void resumeWhenSceneReady(final int generation) {
+		if (!activityIsResumed || generation != resumeRequestGeneration || isFinishing()) return;
+		if (!AndorsTrailApplication.getApplicationFromActivity(this).getWorldSetup().isSceneReady) {
+			mainview.postDelayed(() -> resumeWhenSceneReady(generation), 150);
+			return;
 		}
+
+		if (world.model == null || world.model.statistics.isDead()) {
+			finish();
+			return;
+		}
+		controllers.gameRoundController.onMainActivityResumed();
+		// If a map transition delayed the last quicksave, flush it once ready.
+		saveDeferredQuicksaveIfNeeded();
+		if (world.tileManager.refreshPlayerAppearanceIfChanged(getResources(), world)) {
+			mainview.invalidate();
+		}
+		updateStatus();
 	}
 
 	// Close toolbox by toolbox toggle button.  Needed here since MainView loses focus when toolbox opens.
