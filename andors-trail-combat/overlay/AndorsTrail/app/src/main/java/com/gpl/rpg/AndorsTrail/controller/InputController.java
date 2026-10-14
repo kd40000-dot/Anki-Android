@@ -372,10 +372,9 @@ public final class InputController implements OnClickListener, OnLongClickListen
 		lastTouchPosition_dx = tile_x - world.model.player.position.x;
 		lastTouchPosition_dy = tile_y - world.model.player.position.y;
 
-		// Map taps and the on-screen D-pad are independent input methods. The
-		// D-pad consumes touches inside its own view, so activating it must not
-		// silently disable touch-to-walk on the rest of the map.
-		if (world.model.uiSelections.isInCombat) return false;
+		// Intentional controls: when the on-screen D-pad is active,
+		// tapping the map must not initiate movement.
+		if (world.model.uiSelections.isInCombat || isDpadActive) return false;
 
 		controllers.movementController.startMovement(lastTouchPosition_dx, lastTouchPosition_dy, lastTouchPosition_tileCoords);
 		return true;
