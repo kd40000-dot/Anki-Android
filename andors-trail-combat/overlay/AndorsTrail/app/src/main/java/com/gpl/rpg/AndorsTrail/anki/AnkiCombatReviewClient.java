@@ -296,9 +296,9 @@ public final class AnkiCombatReviewClient {
 
     @SuppressWarnings("deprecation")
     private static boolean hasRawClozeDeletion(String value) {
-        return value != null && java.util.regex.Pattern
-                .compile("\\\\{\\\\{c[0-9]+::", java.util.regex.Pattern.CASE_INSENSITIVE)
-                .matcher(value).find();
+        if (value == null) return false;
+        String raw = value.toLowerCase(Locale.ROOT);
+        return raw.contains("{{c") && raw.contains("::");
     }
 
     private static String htmlToText(String html) {
