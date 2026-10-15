@@ -1,4 +1,4 @@
-name: Build Anki Tap Translation APK
+name: Build Anki Compound Translation Fix APK
 # Corrected ML Kit compile import for native dictionary model downloads.
 # Includes first-load portrait backfill for existing game saves.
 # Includes delayed listener registration for asynchronous scene startup.
@@ -27,7 +27,7 @@ jobs:
       - name: Checkout vampirism integration files
         uses: actions/checkout@v5
         with:
-          ref: feature/anki-word-tap-translation-2026-10-15
+          ref: fix/anki-compound-translation-loading-2026-10-15
           sparse-checkout: |
             andors-trail-combat
             tools
@@ -76,7 +76,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: andors-trail-anki-tap-translation-apk
+          name: andors-trail-anki-compound-translation-fix-apk
           path: andors-upstream/AndorsTrail/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
