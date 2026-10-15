@@ -1,4 +1,5 @@
 name: Build Character Portrait Fix APK
+# Includes first-load portrait backfill for existing game saves.
 # Includes delayed listener registration for asynchronous scene startup.
 
 on:
