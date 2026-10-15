@@ -1,0 +1,82 @@
+name: Build Anki Tap Translation APK
+# Includes first-load portrait backfill for existing game saves.
+# Includes delayed listener registration for asynchronous scene startup.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build_anki_tap_translation.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: andors-trail-anki-tap-translation
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout vampirism integration files
+        uses: actions/checkout@v5
+        with:
+          ref: feature/anki-word-tap-translation-2026-10-15
+          sparse-checkout: |
+            andors-trail-combat
+            tools
+
+      - name: Checkout current Andor's Trail upstream
+        uses: actions/checkout@v5
+        with:
+          repository: AndorsTrailRelease/andors-trail
+          ref: master
+          path: andors-upstream
+          sparse-checkout: AndorsTrail
+
+      - name: Apply combat integration overlay
+        run: cp -a andors-trail-combat/overlay/. andors-upstream/
+
+      - name: Configure stable test signing key
+        run: |
+          cp tools/fallback-release-keystore.jks andors-upstream/AndorsTrail/andors-debug-keystore.jks
+          cat > andors-upstream/AndorsTrail/keystore.properties <<'EOF'
+          betaStoreFile=../andors-debug-keystore.jks
+          betaStorePassword=Test@123
+          betaKeyAlias=my-key
+          betaKeyPassword=Test@123
+          EOF
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android 36 SDK
+        run: |
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Assemble avatar APK
+        run: |
+          cd andors-upstream/AndorsTrail
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: andors-trail-anki-tap-translation-apk
+          path: andors-upstream/AndorsTrail/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
