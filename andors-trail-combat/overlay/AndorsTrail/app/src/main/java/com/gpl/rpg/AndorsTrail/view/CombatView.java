@@ -38,6 +38,7 @@ import com.gpl.rpg.AndorsTrail.Dialogs;
 import com.gpl.rpg.AndorsTrail.R;
 import com.gpl.rpg.AndorsTrail.activity.MainActivity;
 import com.gpl.rpg.AndorsTrail.anki.AnkiCombatReviewClient;
+import com.gpl.rpg.AndorsTrail.anki.AnkiWordTranslator;
 import com.gpl.rpg.AndorsTrail.context.ControllerContext;
 import com.gpl.rpg.AndorsTrail.context.WorldContext;
 import com.gpl.rpg.AndorsTrail.controller.CombatController;
@@ -70,6 +71,8 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	private final TextView ankiPreviousRating;
 	private final TextView ankiStatus;
 	private final TextView ankiQuestion;
+	private final TextView ankiWordTranslation;
+	private final AnkiWordTranslator ankiWordTranslator = new AnkiWordTranslator();
 	private final EditText ankiInput;
 	private final Button ankiReveal;
 	private final TextView ankiFeedback;
@@ -180,6 +183,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		ankiPreviousRating = (TextView) findViewById(R.id.combatview_anki_previous_rating);
 		ankiStatus = (TextView) findViewById(R.id.combatview_anki_status);
 		ankiQuestion = (TextView) findViewById(R.id.combatview_anki_question);
+		ankiWordTranslation = (TextView) findViewById(R.id.combatview_anki_word_translation);
 		ankiInput = (EditText) findViewById(R.id.combatview_anki_input);
 		ankiReveal = (Button) findViewById(R.id.combatview_anki_reveal);
 		ankiFeedback = (TextView) findViewById(R.id.combatview_anki_feedback);
@@ -638,7 +642,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	private void renderLoadingState() {
 		prepareQuizFrame();
 		ankiStatus.setText(ankiSession.errorMessage.isEmpty() ? "Loading Anki card…" : ankiSession.errorMessage);
-		ankiQuestion.setText("");
+		ankiWordTranslator.reset(ankiQuestion, ankiWordTranslation);
 		ankiInput.setVisibility(View.GONE);
 		hideKeyboardIfQuizInputNotVisible();
 		ankiReveal.setVisibility(View.GONE);
@@ -662,7 +666,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		prepareQuizFrame();
 		ankiStatus.setText("");
 		ankiStatus.setVisibility(View.GONE);
-		ankiQuestion.setText(card.question);
+		ankiWordTranslator.renderQuestion(ankiQuestion, ankiWordTranslation, card.question);
 		setInputTextWithoutWatcher(ankiSession.typedText);
 		ankiInput.setEnabled(true);
 		ankiInput.setVisibility(View.VISIBLE);
@@ -696,7 +700,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		}
 
 		prepareQuizFrame();
-		ankiQuestion.setText(card.question);
+		ankiWordTranslator.renderQuestion(ankiQuestion, ankiWordTranslation, card.question);
 		setInputTextWithoutWatcher(ankiSession.typedText);
 		// Keep the EditText enabled/focused so Android does not dismiss the keyboard
 		// between reveal -> rating -> next combat question. Changes made after reveal
@@ -748,6 +752,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		if (!isAttachedToWindow()) return;
 
 		if (!world.model.uiSelections.isInCombat) {
+			ankiWordTranslator.reset(ankiQuestion, ankiWordTranslation);
 			ankiQuiz.setVisibility(View.GONE);
 			ankiFlee.setVisibility(View.GONE);
 			hideAnkiKeyboardAndClearFocus();
@@ -1354,6 +1359,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	}
 	@Override
 	protected void onDetachedFromWindow() {
+		ankiWordTranslator.close();
 		releaseAnkiAudio();
 		super.onDetachedFromWindow();
 	}
