@@ -1,4 +1,4 @@
-name: Build Anki Compound Translation Fix APK
+name: Build Anki Offline Dictionary No Google APK
 # Build the compound-aware and short-English-safe translation branch.
 # Includes first-load portrait backfill for existing game saves.
 # Includes delayed listener registration for asynchronous scene startup.
@@ -27,7 +27,7 @@ jobs:
       - name: Checkout vampirism integration files
         uses: actions/checkout@v5
         with:
-          ref: fix/anki-compound-translation-loading-2026-10-15
+          ref: fix/anki-offline-dictionary-no-play-services-2026-10-15
           sparse-checkout: |
             andors-trail-combat
             tools
@@ -42,6 +42,13 @@ jobs:
 
       - name: Apply combat integration overlay
         run: cp -a andors-trail-combat/overlay/. andors-upstream/
+
+      - name: Bundle CC-BY Vietnamese-English dictionaries (no Google runtime)
+        run: |
+          python3 tools/build_offline_anki_dictionary.py \
+            andors-upstream/AndorsTrail/app/src/main/assets
+          test -s andors-upstream/AndorsTrail/app/src/main/assets/anki_vi_en_dictionary.tsv
+          grep -q '^độc lập' andors-upstream/AndorsTrail/app/src/main/assets/anki_vi_en_dictionary.tsv
 
       - name: Configure stable test signing key
         run: |
@@ -76,7 +83,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: andors-trail-anki-compound-translation-fix-apk
+          name: andors-trail-anki-offline-no-google-apk
           path: andors-upstream/AndorsTrail/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
