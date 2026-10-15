@@ -121,9 +121,14 @@ public final class AnkiCombatReviewClient {
                     int back = findField(names, "Back");
                     int notes = findField(names, "Notes");
 
+                    // Use the provider-rendered question for true cloze notes.
+                    // Pulling the raw Text/Front field would reveal {{c1::answers}}
+                    // before the learner responds.
                     if (front >= 0 && front < fields.length) {
-                        question = htmlToText(fields[front]);
-                    } else if (fields.length > 0) {
+                        if (!hasRawClozeDeletion(fields[front])) {
+                            question = htmlToText(fields[front]);
+                        }
+                    } else if (fields.length > 0 && !hasRawClozeDeletion(fields[0])) {
                         question = htmlToText(fields[0]);
                     }
 
@@ -290,6 +295,12 @@ public final class AnkiCombatReviewClient {
     }
 
     @SuppressWarnings("deprecation")
+    private static boolean hasRawClozeDeletion(String value) {
+        return value != null && java.util.regex.Pattern
+                .compile("\\\\{\\\\{c[0-9]+::", java.util.regex.Pattern.CASE_INSENSITIVE)
+                .matcher(value).find();
+    }
+
     private static String htmlToText(String html) {
         if (html == null) return "";
         String cleaned = html
