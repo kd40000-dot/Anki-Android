@@ -23,15 +23,18 @@ public final class VampirismController {
     public static final String CONDITION_SATED = "vampire_sated";
     public static final String CONDITION_THIRSTY = "vampire_thirsty";
     public static final String CONDITION_STARVING = "vampire_starving";
+    public static final String CONDITION_DAYLIGHT = "vampire_daylight";
     public static final String ITEM_NIGHTBLOOD = "nightblood_vial";
 
     private static final String TIMER_LAST_FEED = "vampire_last_feed";
     private static final String TIMER_INFECTION = "vampire_infection_start";
+    private static final String TIMER_REGEN = "vampire_regeneration_cooldown";
     private static final int INFECTION_ROUNDS = 60;
 
     // World rounds since the last feeding.
-    private static final int THIRSTY_AFTER_ROUNDS = 16;
-    private static final int STARVING_AFTER_ROUNDS = 36;
+    private static final int THIRSTY_AFTER_ROUNDS = 8;
+    private static final int STARVING_AFTER_ROUNDS = 20;
+    private static final int REGEN_AFTER_ROUNDS = 4;
 
     private VampirismController() {}
 
@@ -66,7 +69,9 @@ public final class VampirismController {
 
         if (!isVampire(player)) {
             clearHungerConditions(controllers, world, player);
+            updateDaylightCondition(controllers, world, player);
             world.model.worldData.removeTimer(TIMER_LAST_FEED);
+            world.model.worldData.removeTimer(TIMER_REGEN);
             return;
         }
 
@@ -74,17 +79,33 @@ public final class VampirismController {
             world.model.worldData.createTimer(TIMER_LAST_FEED);
         }
 
+        // Temporary daylight rule: all outdoor maps are considered sunlit,
+        // all indoor maps are considered dark. No device clock or day cycle.
+        // This condition is independent of hunger and recalculated each round.
+        updateDaylightCondition(controllers, world, player);
+
         if (world.model.worldData.hasTimerElapsed(TIMER_LAST_FEED, STARVING_AFTER_ROUNDS)) {
             setHungerCondition(controllers, world, player, CONDITION_STARVING);
+            world.model.worldData.removeTimer(TIMER_REGEN);
             // Starvation is dangerous but will not directly kill the player.
             if (player.health.current > 1) {
                 controllers.actorStatsController.removeActorHealth(player, 1);
             }
         } else if (world.model.worldData.hasTimerElapsed(TIMER_LAST_FEED, THIRSTY_AFTER_ROUNDS)) {
             setHungerCondition(controllers, world, player, CONDITION_THIRSTY);
+            world.model.worldData.removeTimer(TIMER_REGEN);
         } else {
             setHungerCondition(controllers, world, player, CONDITION_SATED);
-            controllers.actorStatsController.addActorHealth(player, 1);
+            if (isOutdoorDaylight(world)) {
+                // No regeneration in daylight, and outdoor rounds cannot
+                // accumulate a charge to heal immediately upon entering.
+                world.model.worldData.removeTimer(TIMER_REGEN);
+            } else if (!world.model.worldData.hasTimerElapsed(TIMER_REGEN, 0)) {
+                world.model.worldData.createTimer(TIMER_REGEN);
+            } else if (world.model.worldData.hasTimerElapsed(TIMER_REGEN, REGEN_AFTER_ROUNDS)) {
+                controllers.actorStatsController.addActorHealth(player, 1);
+                world.model.worldData.createTimer(TIMER_REGEN);
+            }
         }
     }
 
@@ -104,8 +125,10 @@ public final class VampirismController {
         if (isVampire(player)) {
             if (isFeedable(killedMonster)) {
                 world.model.worldData.createTimer(TIMER_LAST_FEED);
+                world.model.worldData.removeTimer(TIMER_REGEN);
                 setHungerCondition(controllers, world, player, CONDITION_SATED);
-                controllers.actorStatsController.addActorHealth(player, 4);
+                updateDaylightCondition(controllers, world, player);
+                controllers.actorStatsController.addActorHealth(player, 2);
                 world.model.combatLog.append("You feed on " + killedMonster.monsterType.name + ". The hunger recedes.");
             }
             return;
@@ -139,9 +162,45 @@ public final class VampirismController {
         removeCondition(controllers, world, player, CONDITION_INFECTION);
         applyCondition(controllers, world, player, CONDITION_VAMPIRISM, ActorCondition.DURATION_FOREVER);
         world.model.worldData.createTimer(TIMER_LAST_FEED);
+        world.model.worldData.removeTimer(TIMER_REGEN);
         setHungerCondition(controllers, world, player, CONDITION_SATED);
+        updateDaylightCondition(controllers, world, player);
         controllers.actorStatsController.addActorHealth(player, 5);
         world.model.combatLog.append("The blood curse takes hold. Your heartbeat slows, and a terrible hunger awakens. You have become a vampire.");
+    }
+
+    /**
+     * Applies daylight penalties as soon as the current map changes and again
+     * on world-round advancement. Hunger remains independent of sunlight.
+     * Public for the map-transition callback.
+     */
+    public static void updateDaylightCondition(ControllerContext controllers, WorldContext world) {
+        if (world == null || world.model == null || world.model.player == null) return;
+        updateDaylightCondition(controllers, world, world.model.player);
+    }
+
+    private static boolean isOutdoorDaylight(WorldContext world) {
+        return world.model.currentMaps != null
+                && world.model.currentMaps.map != null
+                && world.model.currentMaps.map.isOutdoors;
+    }
+
+    private static void updateDaylightCondition(
+            ControllerContext controllers, WorldContext world, Player player) {
+        boolean shouldHave = isVampire(player) && isOutdoorDaylight(world);
+        boolean currentlyHas = hasCondition(player, CONDITION_DAYLIGHT);
+        if (shouldHave != currentlyHas) {
+            if (shouldHave) {
+                applyCondition(controllers, world, player, CONDITION_DAYLIGHT,
+                        ActorCondition.DURATION_FOREVER);
+            } else {
+                removeCondition(controllers, world, player, CONDITION_DAYLIGHT);
+            }
+            controllers.actorStatsController.recalculatePlayerStats(player);
+        }
+        if (shouldHave) {
+            world.model.worldData.removeTimer(TIMER_REGEN);
+        }
     }
 
     private static void setHungerCondition(
