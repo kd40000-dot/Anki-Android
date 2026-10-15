@@ -219,12 +219,11 @@ public final class AnkiWordTranslator {
 
     private void translate(TextView result, String phrase, String sourceCode, long request) {
         if (!isCurrent(request)) return;
+        // Short English prompts are sometimes classified as "und".
+        // In that case use English rather than breaking tap translation.
         String source = TranslateLanguage.fromLanguageTag(
                 sourceCode == null ? "" : sourceCode.toLowerCase(Locale.ROOT));
-        if (source == null) {
-            result.setText(phrase + "  •  Unsupported source language.");
-            return;
-        }
+        if (source == null) source = TranslateLanguage.ENGLISH;
         String target = source.equals(TranslateLanguage.ENGLISH)
                 ? TranslateLanguage.VIETNAMESE : TranslateLanguage.ENGLISH;
         String direction = source + " → " + target;
