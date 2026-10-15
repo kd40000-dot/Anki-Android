@@ -20,6 +20,8 @@
 	<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
 	<!-- Sprite playground: allows /storage/emulated/0/AndorsTrail hot-swap assets on Android 11+. -->
 	<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+	<!-- Needed only the first time ML Kit downloads translation models. -->
+	<uses-permission android:name="android.permission.INTERNET" />
 	<uses-feature android:name="android.software.leanback" android:required="false"/>
 	<uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
 
