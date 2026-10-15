@@ -11,7 +11,7 @@ import android.widget.TextView;
 
 import com.google.mlkit.nl.languageid.LanguageIdentification;
 import com.google.mlkit.nl.languageid.LanguageIdentifier;
-import com.google.mlkit.nl.translate.DownloadConditions;
+import com.google.mlkit.common.model.DownloadConditions;
 import com.google.mlkit.nl.translate.TranslateLanguage;
 import com.google.mlkit.nl.translate.Translation;
 import com.google.mlkit.nl.translate.Translator;
@@ -115,7 +115,7 @@ public final class AnkiWordTranslator {
                 .setSourceLanguage(from).setTargetLanguage(to).build());
 
         final String direction = from + " → " + to;
-        translated.setText(word + "  (" + direction + ")  •  Translating…");
+        translated.setText(word + "  (" + direction + ")  •  Preparing offline translation…");
         // Download once over Wi-Fi, then use the cached model without a network.
         DownloadConditions conditions = new DownloadConditions.Builder().requireWifi().build();
         translator.downloadModelIfNeeded(conditions)
