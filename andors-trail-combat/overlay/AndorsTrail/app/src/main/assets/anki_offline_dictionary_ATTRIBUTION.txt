@@ -1,0 +1,23 @@
+Offline Anki Vietnamese-English Dictionary
+
+VNEDICT by Paul Denisowski.
+Source: http://www.denisowski.org/Vietnamese/vnedict_readme.htm
+Repackaged StarDict data from:
+https://github.com/cer28/stardict-vnedict
+Pinned upstream snapshot:
+https://github.com/cer28/stardict-vnedict/tree/96f54e16f1ed1062a4b6c817711f3b097e477e2d
+
+Data copyright: Paul Denisowski, licensed under Creative Commons
+Attribution 3.0 Unported (CC BY 3.0):
+https://creativecommons.org/licenses/by/3.0/
+
+Adaptations: extracted StarDict headwords and English glosses into UTF-8
+lookup tables, stripped formatting, shortened long entries to fit an
+in-game popup, and supplemented common Vietnamese function words.
+The dictionary is bundled in the APK and works entirely offline.
+It is not a full-sentence machine translation model.
+
+The Vietnamese compound segmentation word list is by
+Vietnamese Natural Language Processing (VNTK), MIT license.
+https://github.com/vntk/dictionary
+See anki_vietnamese_compounds_LICENSE.txt.
