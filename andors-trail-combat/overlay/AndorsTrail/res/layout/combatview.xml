@@ -184,7 +184,7 @@
                 android:paddingRight="44dp"
                 android:paddingBottom="10dp"
                 android:textColor="?attr/ui_theme_dialogue_light_color"
-                android:textIsSelectable="true"
+                android:textIsSelectable="false"
                 android:textSize="24sp"
                 android:textStyle="bold" />
 
@@ -200,6 +200,19 @@
                 android:textSize="16sp"
                 android:visibility="gone" />
         </RelativeLayout>
+
+        <!-- Visible only after tapping a word. No modal/keyboard interruption. -->
+        <TextView
+            android:id="@+id/combatview_anki_word_translation"
+            style="@style/AndorsTrail_Style_LightFrame"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="3dp"
+            android:gravity="center"
+            android:padding="6dp"
+            android:textSize="16sp"
+            android:textColor="?attr/ui_theme_dialogue_light_color"
+            android:visibility="gone" />
 
         <EditText
             android:id="@+id/combatview_anki_input"
