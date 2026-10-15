@@ -12,18 +12,10 @@ import android.text.style.ClickableSpan;
 import android.view.View;
 import android.widget.TextView;
 
-import com.google.android.gms.tasks.Task;
-import com.google.mlkit.common.model.DownloadConditions;
-import com.google.mlkit.nl.languageid.LanguageIdentification;
-import com.google.mlkit.nl.languageid.LanguageIdentifier;
-import com.google.mlkit.nl.translate.TranslateLanguage;
-import com.google.mlkit.nl.translate.Translation;
-import com.google.mlkit.nl.translate.Translator;
-import com.google.mlkit.nl.translate.TranslatorOptions;
-
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -31,56 +23,49 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Tappable Vietnamese/English sentence text. Spans target Vietnamese lexical
- * words, not merely space-delimited syllables ("độc lập" stays together).
- * All translation is on-device after an initial model download.
+ * Service-free offline dictionary for tappable Anki question words.
  *
- * No card answer, rating, or game action is ever touched by this class.
+ * Vietnamese word boundaries are lexical, including multi-syllable words such
+ * as "độc lập". Word definitions come from bundled VNEDICT data (CC BY 3.0).
+ * No internet, Play Services, Google libraries or runtime model downloads.
+ *
+ * This class never accesses hidden cloze answers or changes review scheduling.
  */
 public final class AnkiWordTranslator {
     private static final Pattern SYLLABLE = Pattern.compile(
             "[\\p{L}\\p{M}]+(?:['’\\-][\\p{L}\\p{M}]+)*");
     private static final int MAX_COMPOUND_SYLLABLES = 4;
-    private static final long SLOW_DOWNLOAD_MS = 15000L;
-    private static final long DOWNLOAD_TIMEOUT_MS = 90000L;
-    private static final long TRANSLATE_TIMEOUT_MS = 20000L;
 
     private static final class Token {
         final int start;
         final int end;
+
         Token(int start, int end) {
             this.start = start;
             this.end = end;
         }
     }
 
-    private static final class Model {
-        final Translator translator;
-        Task<Void> download;
-        boolean ready;
-        boolean abandoned;
-        Model(Translator translator) {
-            this.translator = translator;
-        }
-    }
-
-    private final LanguageIdentifier languageIdentifier = LanguageIdentification.getClient();
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final Map<String, Model> models = new HashMap<>();
+    private final ExecutorService dictionaryExecutor = Executors.newSingleThreadExecutor();
     private final Set<String> compounds = new HashSet<>();
+    private final Map<String, String> vietnameseEnglish = new HashMap<>();
+    private final Map<String, String> englishVietnamese = new HashMap<>();
+
     private boolean lexiconLoaded;
+    private boolean dictionaryLoadAttempted;
+    private String dictionaryLoadError;
     private String visibleSentence;
     private long requestVersion;
     private boolean closed;
 
-    /**
-     * A clickable span covers the entire Vietnamese lexical unit. It preserves
-     * the existing visual appearance and doesn't steal focus from the keyboard.
-     */
+    /** Install tap targets without changing the current question typography. */
     public void renderQuestion(TextView question, TextView resultView, String sentence) {
         if (closed) return;
         String text = sentence == null ? "" : sentence;
@@ -94,23 +79,21 @@ public final class AnkiWordTranslator {
         SpannableStringBuilder rich = new SpannableStringBuilder(text);
         List<Token> syllables = new ArrayList<>();
         Matcher matcher = SYLLABLE.matcher(text);
-        while (matcher.find()) {
-            syllables.add(new Token(matcher.start(), matcher.end()));
-        }
+        while (matcher.find()) syllables.add(new Token(matcher.start(), matcher.end()));
 
         boolean vietnamese = looksVietnamese(text);
         for (int i = 0; i < syllables.size();) {
-            int size = vietnamese ? compoundSize(text, syllables, i) : 1;
+            int count = vietnamese ? compoundSize(text, syllables, i) : 1;
             Token start = syllables.get(i);
-            Token end = syllables.get(i + size - 1);
-            final String chosen = text.substring(start.start, end.end);
-            // No clickable span should be created for a raw cloze placeholder.
+            Token end = syllables.get(i + count - 1);
+            final String word = text.substring(start.start, end.end);
             if (!isClozePlaceholder(text, start.start, end.end)) {
                 rich.setSpan(new ClickableSpan() {
                     @Override
                     public void onClick(View view) {
-                        lookup(resultView, chosen, text);
+                        lookup(resultView, word, text);
                     }
+
                     @Override
                     public void updateDrawState(TextPaint paint) {
                         paint.setUnderlineText(false);
@@ -118,7 +101,7 @@ public final class AnkiWordTranslator {
                     }
                 }, start.start, end.end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             }
-            i += size;
+            i += count;
         }
 
         question.setText(rich, TextView.BufferType.SPANNABLE);
@@ -128,21 +111,25 @@ public final class AnkiWordTranslator {
         question.setFocusableInTouchMode(false);
     }
 
-    private static boolean isClozePlaceholder(String sentence, int start, int end) {
-        return start >= 2 && sentence.substring(start - 2, start).equals("{{")
-                || end + 2 <= sentence.length() && sentence.substring(end, end + 2).equals("}}");
+    private static boolean isClozePlaceholder(String text, int start, int end) {
+        return (start >= 2 && text.substring(start - 2, start).equals("{{"))
+                || (end + 2 <= text.length()
+                    && text.substring(end, end + 2).equals("}}"));
     }
 
-    private static boolean looksVietnamese(String sentence) {
-        // Covers the characteristic Vietnamese vowels, đ, and accented vowels.
-        for (int i = 0; i < sentence.length(); i++) {
-            char c = sentence.charAt(i);
-            if (c == 'đ' || c == 'Đ'
-                    || (c >= '\u00c0' && c <= '\u1ef9')) {
+    private static boolean looksVietnamese(String text) {
+        for (int i = 0; i < text.length(); ++i) {
+            char c = text.charAt(i);
+            if (c == 'đ' || c == 'Đ' || (c >= '\u00c0' && c <= '\u1ef9')) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static String normalize(String text) {
+        return Normalizer.normalize(text.toLowerCase(Locale.ROOT).trim()
+                .replaceAll("[ \\t]+", " "), Normalizer.Form.NFC);
     }
 
     private void ensureLexiconLoaded(Context context) {
@@ -154,168 +141,113 @@ public final class AnkiWordTranslator {
             String line;
             while ((line = reader.readLine()) != null) {
                 if (!line.startsWith("#") && line.indexOf(' ') >= 0) {
-                    compounds.add(line.trim().toLowerCase(Locale.ROOT));
+                    compounds.add(normalize(line));
                 }
             }
         } catch (Exception ignored) {
-            // A missing word list must never prevent the card from being answered.
-            // Individual-syllable taps remain functional.
+            // Missing segmentation data should never stop gameplay.
         }
     }
 
-    /** Longest lexicon match starting at i, never crossing punctuation. */
-    private int compoundSize(String text, List<Token> words, int i) {
-        int max = Math.min(MAX_COMPOUND_SYLLABLES, words.size() - i);
-        for (int size = max; size > 1; size--) {
-            boolean contiguous = true;
-            for (int j = i + 1; j < i + size; j++) {
-                String between = text.substring(words.get(j - 1).end, words.get(j).start);
-                if (!between.matches("[ \\t]+")) {
-                    contiguous = false;
+    /** Longest dictionary phrase match; punctuation is always a boundary. */
+    private int compoundSize(String text, List<Token> words, int start) {
+        int max = Math.min(MAX_COMPOUND_SYLLABLES, words.size() - start);
+        for (int size = max; size > 1; --size) {
+            boolean adjacent = true;
+            for (int i = start + 1; i < start + size; ++i) {
+                String gap = text.substring(words.get(i - 1).end, words.get(i).start);
+                if (!gap.matches("[ \\t]+")) {
+                    adjacent = false;
                     break;
                 }
             }
-            if (!contiguous) continue;
-            String candidate = text.substring(words.get(i).start,
-                    words.get(i + size - 1).end)
-                    .replaceAll("[ \\t]+", " ")
-                    .toLowerCase(Locale.ROOT);
-            if (compounds.contains(candidate)) return size;
+            if (!adjacent) continue;
+            String phrase = normalize(text.substring(
+                    words.get(start).start, words.get(start + size - 1).end));
+            if (compounds.contains(phrase)) return size;
         }
         return 1;
     }
 
+    /** Load the dictionary from APK assets once, on a background thread. */
+    private void loadDictionary(Context context) {
+        if (dictionaryLoadAttempted) return;
+        dictionaryLoadAttempted = true;
+        try {
+            loadEntries(context, "anki_vi_en_dictionary.tsv", vietnameseEnglish);
+            loadEntries(context, "anki_en_vi_dictionary.tsv", englishVietnamese);
+            if (vietnameseEnglish.size() < 30000) {
+                dictionaryLoadError = "Offline dictionary was not bundled correctly.";
+            }
+        } catch (Exception e) {
+            dictionaryLoadError = "Offline dictionary could not be read: "
+                    + e.getClass().getSimpleName();
+        }
+    }
+
+    private static void loadEntries(Context context, String file, Map<String, String> target)
+            throws java.io.IOException {
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                context.getAssets().open(file), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.startsWith("#")) continue;
+                int tab = line.indexOf('\t');
+                if (tab <= 0 || tab >= line.length() - 1) continue;
+                String word = normalize(line.substring(0, tab));
+                String definition = line.substring(tab + 1).trim();
+                if (!word.isEmpty() && !definition.isEmpty()) {
+                    target.put(word, definition);
+                }
+            }
+        }
+    }
+
     private void lookup(TextView result, String phrase, String sentence) {
         if (closed) return;
-        long request = ++requestVersion;
+        final long request = ++requestVersion;
+        final String key = normalize(phrase);
+        final boolean vietnamese = looksVietnamese(sentence);
+        final Context context = result.getContext().getApplicationContext();
+
         result.setVisibility(View.VISIBLE);
+        result.setText(phrase + "  •  Looking up offline…");
+        dictionaryExecutor.execute(() -> {
+            loadDictionary(context);
+            String definition = vietnamese
+                    ? vietnameseEnglish.get(key) : englishVietnamese.get(key);
+            String direction = vietnamese ? "vi → en" : "en → vi";
 
-        // Skip language detection altogether for Vietnamese text: it's both
-        // faster and more reliable on the short sentences used by cloze cards.
-        if (looksVietnamese(sentence)) {
-            translate(result, phrase, TranslateLanguage.VIETNAMESE, request);
-            return;
-        }
-
-        result.setText(phrase + "  •  Detecting language…");
-        final boolean[] resolved = {false};
-        languageIdentifier.identifyLanguage(sentence)
-                .addOnSuccessListener(code -> {
-                    if (resolved[0] || !isCurrent(request)) return;
-                    resolved[0] = true;
-                    translate(result, phrase, code, request);
-                })
-                .addOnFailureListener(error -> {
-                    if (resolved[0] || !isCurrent(request)) return;
-                    resolved[0] = true;
-                    translate(result, phrase, TranslateLanguage.ENGLISH, request);
-                });
-        handler.postDelayed(() -> {
-            if (resolved[0] || !isCurrent(request)) return;
-            resolved[0] = true;
-            translate(result, phrase, TranslateLanguage.ENGLISH, request);
-        }, 3000);
-    }
-
-    private void translate(TextView result, String phrase, String sourceCode, long request) {
-        if (!isCurrent(request)) return;
-        // Short English prompts are sometimes classified as "und".
-        // In that case use English rather than breaking tap translation.
-        String source = TranslateLanguage.fromLanguageTag(
-                sourceCode == null ? "" : sourceCode.toLowerCase(Locale.ROOT));
-        if (source == null) source = TranslateLanguage.ENGLISH;
-        String target = source.equals(TranslateLanguage.ENGLISH)
-                ? TranslateLanguage.VIETNAMESE : TranslateLanguage.ENGLISH;
-        String direction = source + " → " + target;
-        String key = source + "/" + target;
-
-        Model model = models.get(key);
-        if (model == null) {
-            Translator translator = Translation.getClient(new TranslatorOptions.Builder()
-                    .setSourceLanguage(source).setTargetLanguage(target).build());
-            model = new Model(translator);
-            models.put(key, model);
-        }
-        final Model chosenModel = model;
-        if (model.ready) {
-            translateWithModel(result, phrase, direction, request, model);
-            return;
-        }
-
-        result.setText(phrase + "  (" + direction + ")  •  Downloading offline model…");
-        if (model.download == null) {
-            // Crucially, do not require Wi-Fi: cellular, hotspot and existing
-            // cached models should all be allowed. The model downloads only once.
-            DownloadConditions conditions = new DownloadConditions.Builder().build();
-            model.download = model.translator.downloadModelIfNeeded(conditions);
-            model.download.addOnCompleteListener(task -> {
-                if (chosenModel.abandoned || closed) {
-                    chosenModel.translator.close();
-                    return;
+            if (definition == null) {
+                definition = vietnamese
+                        ? englishVietnamese.get(key) : vietnameseEnglish.get(key);
+                if (definition != null) {
+                    direction = vietnamese ? "en → vi" : "vi → en";
                 }
-                if (task.isSuccessful()) {
-                    chosenModel.ready = true;
-                } else if (models.get(key) == chosenModel) {
-                    models.remove(key);
-                    chosenModel.translator.close();
+            }
+            final String answer = definition;
+            final String directionLabel = direction;
+            final String error = dictionaryLoadError;
+
+            handler.post(() -> {
+                if (!isCurrent(request)) return;
+                if (error != null) {
+                    result.setText(phrase + "  •  " + error);
+                } else if (answer != null) {
+                    result.setText(phrase + "  →  " + answer
+                            + "    (" + directionLabel + ")");
+                } else {
+                    result.setText(phrase + "  •  No offline dictionary entry.");
                 }
             });
-        }
-        final Task<Void> task = model.download;
-        task.addOnSuccessListener(ignored -> {
-            if (!isCurrent(request) || chosenModel.abandoned) return;
-            chosenModel.ready = true;
-            translateWithModel(result, phrase, direction, request, chosenModel);
-        }).addOnFailureListener(error -> {
-            if (!isCurrent(request)) return;
-            String detail = error.getLocalizedMessage();
-            if (detail == null || detail.trim().isEmpty()) detail = "Download failed";
-            if (detail.length() > 100) detail = detail.substring(0, 100);
-            result.setText(phrase + "  •  " + detail + ". Check Internet/Play Services; tap to retry.");
         });
-
-        handler.postDelayed(() -> {
-            if (!isCurrent(request) || task.isComplete()) return;
-            result.setText(phrase + "  •  Still downloading the offline language model. "
-                    + "First use may take a minute; Internet is required.");
-        }, SLOW_DOWNLOAD_MS);
-        handler.postDelayed(() -> {
-            if (!isCurrent(request) || task.isComplete()) return;
-            if (models.get(key) == chosenModel) {
-                chosenModel.abandoned = true;
-                models.remove(key); // New tap can start a fresh attempt.
-                // The old translator is closed when its pending task completes.
-            }
-            result.setText(phrase + "  •  Model download timed out. "
-                    + "Check Internet and Google Play Services, then tap again.");
-        }, DOWNLOAD_TIMEOUT_MS);
-    }
-
-    private void translateWithModel(TextView result, String phrase, String direction,
-            long request, Model model) {
-        if (!isCurrent(request)) return;
-        result.setText(phrase + "  •  Translating…");
-        Task<String> task = model.translator.translate(phrase);
-        task.addOnSuccessListener(translated -> {
-            if (isCurrent(request)) {
-                result.setText(phrase + "  →  " + translated + "    (" + direction + ")");
-            }
-        }).addOnFailureListener(error -> {
-            if (isCurrent(request)) {
-                result.setText(phrase + "  •  Translation failed. Tap to retry.");
-            }
-        });
-        handler.postDelayed(() -> {
-            if (isCurrent(request) && !task.isComplete()) {
-                result.setText(phrase + "  •  Translation timed out. Tap to retry.");
-            }
-        }, TRANSLATE_TIMEOUT_MS);
     }
 
     private boolean isCurrent(long request) {
-        return !closed && request == requestVersion;
+        return !closed && requestVersion == request;
     }
 
+    /** Never let the previous card's translation appear on a new card. */
     public void reset(TextView question, TextView result) {
         requestVersion++;
         visibleSentence = null;
@@ -327,15 +259,9 @@ public final class AnkiWordTranslator {
         closed = true;
         requestVersion++;
         handler.removeCallbacksAndMessages(null);
-        languageIdentifier.close();
-        for (Model model : models.values()) {
-            if (model.download == null || model.download.isComplete()) {
-                model.translator.close();
-            } else {
-                model.abandoned = true; // Completion callback closes it.
-            }
-        }
-        models.clear();
+        dictionaryExecutor.shutdownNow();
         compounds.clear();
+        vietnameseEnglish.clear();
+        englishVietnamese.clear();
     }
 }
