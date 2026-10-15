@@ -139,6 +139,12 @@ public final class Savegames {
 				boolean b = getSlotFile(slot, androidContext).delete();
 				writeCheatCheck(androidContext, DENY_LOADING_BECAUSE_GAME_IS_CURRENTLY_PLAYED, fh.playerId);
 			}
+			// Backfill portraits for older saves that predate the sidecar cache.
+			// Never modify the serialized save or anti-cheat record.
+			if (result == LoadSavegameResult.success && (slot == SLOT_QUICKSAVE
+					|| world.model.statistics.hasUnlimitedSaves())) {
+				SavedHeroPortraits.save(androidContext, slot, world);
+			}
 			return result;
 		} catch (IOException e) {
 			lastLoadFailureMessage = e.getMessage() != null ? e.getMessage() : e.toString();
