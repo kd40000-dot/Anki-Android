@@ -14,7 +14,7 @@ import sys
 import urllib.request
 from pathlib import Path
 
-ORIGIN = "https://raw.githubusercontent.com/cer28/stardict-vnedict/main/compiled/"
+ORIGIN = "https://raw.githubusercontent.com/cer28/stardict-vnedict/96f54e16f1ed1062a4b6c817711f3b097e477e2d/compiled/"
 HEADERS = {"User-Agent": "AndorsTrail-Offline-Word-Dictionary/1.0"}
 REQUIRED = {"độc lập", "bạn", "người", "muốn", "một", "là"}
 
