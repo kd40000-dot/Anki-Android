@@ -1,4 +1,5 @@
 name: Build Anki Tap Translation APK
+# Corrected ML Kit compile import for native dictionary model downloads.
 # Includes first-load portrait backfill for existing game saves.
 # Includes delayed listener registration for asynchronous scene startup.
 
