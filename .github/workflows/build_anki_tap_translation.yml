@@ -1,5 +1,6 @@
 name: Build Anki Offline Dictionary No Google APK
 # Build the compound-aware and short-English-safe translation branch.
+# Include thư ký / thư kí compound variant in bundled lexicon.
 # Includes first-load portrait backfill for existing game saves.
 # Includes delayed listener registration for asynchronous scene startup.
 
