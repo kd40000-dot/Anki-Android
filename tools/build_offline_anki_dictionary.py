@@ -16,7 +16,7 @@ from pathlib import Path
 
 ORIGIN = "https://raw.githubusercontent.com/cer28/stardict-vnedict/96f54e16f1ed1062a4b6c817711f3b097e477e2d/compiled/"
 HEADERS = {"User-Agent": "AndorsTrail-Offline-Word-Dictionary/1.0"}
-REQUIRED = {"độc lập", "bạn", "người", "muốn", "một", "là"}
+REQUIRED = {"độc lập", "thư ký", "bạn", "người", "muốn", "một", "là"}
 
 
 def read_public_data(filename):
@@ -67,6 +67,8 @@ def main(outdir):
     # game, even when a dictionary's headword conventions vary.
     common = {
         "độc lập": "independent; autonomous; self-reliant",
+        "thư ký": "secretary; administrative assistant",
+        "thư kí": "secretary; administrative assistant",
         "muốn": "want; wish; desire",
         "bạn": "you; friend",
         "người": "person; human; people",
@@ -112,6 +114,7 @@ def main(outdir):
     for en, vi in {
         "you": "bạn",
         "independent": "độc lập",
+        "secretary": "thư ký",
         "autonomous": "độc lập",
         "want": "muốn",
         "friend": "bạn",
