@@ -28,7 +28,7 @@ jobs:
       - name: Checkout vampirism integration files
         uses: actions/checkout@v5
         with:
-          ref: fix/anki-offline-dictionary-no-play-services-2026-10-15
+          ref: fix/anki-offline-thu-ky-compound-2026-10-18
           sparse-checkout: |
             andors-trail-combat
             tools
@@ -50,6 +50,8 @@ jobs:
             andors-upstream/AndorsTrail/app/src/main/assets
           test -s andors-upstream/AndorsTrail/app/src/main/assets/anki_vi_en_dictionary.tsv
           grep -q '^độc lập' andors-upstream/AndorsTrail/app/src/main/assets/anki_vi_en_dictionary.tsv
+          grep -q '^thư ký' andors-upstream/AndorsTrail/app/src/main/assets/anki_vi_en_dictionary.tsv
+          grep -qx 'thư ký' andors-upstream/AndorsTrail/app/src/main/assets/anki_vietnamese_compounds.txt
 
       - name: Configure stable test signing key
         run: |
