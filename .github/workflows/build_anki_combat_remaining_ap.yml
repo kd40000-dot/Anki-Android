@@ -1,5 +1,6 @@
 name: Build Andors Trail Anki Combat Remaining AP APK
 # Build the latest offline Anki translation and preserve AP across successful combat answers.
+# Source revision 7c33d1b61706b25d480f9d86a0607d56ca0ad69a includes card-panel continuation.
 # Include thư ký / thư kí compound variant in bundled lexicon.
 # Includes first-load portrait backfill for existing game saves.
 # Includes delayed listener registration for asynchronous scene startup.
