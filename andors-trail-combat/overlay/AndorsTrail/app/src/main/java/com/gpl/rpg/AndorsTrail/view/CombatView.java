@@ -951,6 +951,10 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		// Prevent the watchdog from loading another card in the small window before
 		// the attack/skip-turn transition completes.
 		ankiSession.bypassForCurrentTurn = true;
+		// Clear the answered-card panel while the attack animation resolves. If
+		// attack AP is exhausted but move/item AP remains, normal controls return.
+		// Anki-gated attack completion will load a new card when another attack fits.
+		syncAnkiUiFromSession(false);
 
 		if (!world.model.uiSelections.isInCombat) return;
 		if (shouldAttack) {
