@@ -43,8 +43,8 @@ public final class CombatController implements VisualEffectCompletedCallback {
 
 	// While the Anki combat question is unresolved, block normal player combat actions.
 	private boolean ankiQuizGateActive = false;
-	// A correct quiz answer gives exactly one attack, then hands the turn to the monsters.
-	private boolean quizAttackEndsTurn = false;
+	// Tracks a card-approved attack through its animation and AP accounting.
+	private boolean ankiAttackPendingCompletion = false;
 
 	/**
 	 * Retained Anki-combat state. CombatController belongs to the application ControllerContext,
@@ -160,7 +160,7 @@ public final class CombatController implements VisualEffectCompletedCallback {
 	}
 	public void exitCombat(boolean pickupLootBags, boolean canceledCombat) {
 		ankiQuizGateActive = false;
-		quizAttackEndsTurn = false;
+		ankiAttackPendingCompletion = false;
 		ankiCombatSession.resetAll();
 		setCombatSelection(null, null);
 		world.model.uiSelections.isInCombat = false;
@@ -318,7 +318,7 @@ public final class CombatController implements VisualEffectCompletedCallback {
 	public void resetAnkiQuizAndUnlockCombat() {
 		ankiCombatSession.resetAll();
 		ankiQuizGateActive = false;
-		quizAttackEndsTurn = false;
+		ankiAttackPendingCompletion = false;
 	}
 
 	public void skipAnkiQuizTurn() {
@@ -354,17 +354,17 @@ public final class CombatController implements VisualEffectCompletedCallback {
 			setCombatSelection(target);
 		}
 
-		quizAttackEndsTurn = true;
+		ankiAttackPendingCompletion = true;
 		executePlayerAttack();
 	}
 
 	private void executePlayerAttack() {
 		if (controllers.effectController.isRunningVisualEffect()) {
-			quizAttackEndsTurn = false;
+			ankiAttackPendingCompletion = false;
 			return;
 		}
 		if (!useAPs(world.model.player.getAttackCost())) {
-			quizAttackEndsTurn = false;
+			ankiAttackPendingCompletion = false;
 			return;
 		}
 		final Monster target = world.model.uiSelections.selectedMonster;
@@ -395,13 +395,16 @@ public final class CombatController implements VisualEffectCompletedCallback {
 			selectNextAggressiveMonster();
 		}
 
-		if (quizAttackEndsTurn) {
-			quizAttackEndsTurn = false;
-			if (!world.model.uiSelections.isInCombat) return;
-			if (canExitCombat()) {
-				exitCombat(true);
-			} else {
-				endPlayerTurn();
+		if (ankiAttackPendingCompletion) {
+			ankiAttackPendingCompletion = false;
+			// The normal AP check ends the turn only after AP is exhausted.
+			playerActionCompleted();
+			if (!world.model.uiSelections.isInCombat || !world.model.uiSelections.isPlayersCombatTurn) return;
+
+			if (world.model.player.hasAPs(world.model.player.getAttackCost())) {
+				// Anki-gate the next attack without refilling AP or starting a new round.
+				ankiQuizGateActive = true;
+				combatTurnListeners.onNewPlayerTurn();
 			}
 			return;
 		}
@@ -862,7 +865,7 @@ public final class CombatController implements VisualEffectCompletedCallback {
 			ankiCombatSession.resetAll();
 			ankiCombatSession.bypassForCurrentTurn = true;
 			ankiQuizGateActive = false;
-			quizAttackEndsTurn = false;
+			ankiAttackPendingCompletion = false;
 		}
 		setCombatSelection(null, null);
 		combatActionListeners.onPlayerStartedFleeing();
