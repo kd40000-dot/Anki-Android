@@ -897,7 +897,11 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 			ankiSession.operationId++;
 			ankiSession.resetAttempt();
 			ankiSession.setPhase(CombatController.AnkiCombatSession.Phase.IDLE);
-			controllers.combatController.skipAnkiQuizTurn();
+			// The failed card stays pending, but only the attempted attack's
+			// AP is lost. A new attempt is offered if enough AP remains.
+			ankiSession.bypassForCurrentTurn = true;
+			syncAnkiUiFromSession(false);
+			controllers.combatController.consumeAnkiFailedAttackAP();
 			return;
 		}
 
@@ -949,7 +953,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		controllers.combatController.setLastAnkiRecordedEase(recordedEase);
 		ankiSession.resetAll();
 		// Prevent the watchdog from loading another card in the small window before
-		// the attack/skip-turn transition completes.
+		// the attack/failed-attempt transition completes.
 		ankiSession.bypassForCurrentTurn = true;
 		// Clear the answered-card panel while the attack animation resolves. If
 		// attack AP is exhausted but move/item AP remains, normal controls return.
@@ -960,7 +964,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		if (shouldAttack) {
 			controllers.combatController.executeAnkiQuizAttack();
 		} else if (world.model.uiSelections.isPlayersCombatTurn) {
-			controllers.combatController.skipAnkiQuizTurn();
+			controllers.combatController.consumeAnkiFailedAttackAP();
 		}
 	}
 
