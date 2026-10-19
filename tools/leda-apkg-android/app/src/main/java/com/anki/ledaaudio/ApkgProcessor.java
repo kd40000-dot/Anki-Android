@@ -115,7 +115,7 @@ final class ApkgProcessor {
     }
     static void build(Context context,Plan p,Uri output,Uri optionalZip,JSONObject credentials,String project,
                       Status log,AtomicBoolean cancelled)throws Exception {
-        HashMap<String,byte[]> supplied=loadSupplied(context,optionalZip,log);
+        Map<String,byte[]> supplied=loadSupplied(context,optionalZip,log);
         File cache=new File(context.getFilesDir(),"verified_leda_mp3");
         if(!cache.exists()&&!cache.mkdirs())throw new IOException("Cannot create audio cache.");
         LinkedHashMap<String,Edit> jobs=new LinkedHashMap<>();
