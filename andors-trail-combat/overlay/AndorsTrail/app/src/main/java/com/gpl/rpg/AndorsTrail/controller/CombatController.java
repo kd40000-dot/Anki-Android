@@ -321,10 +321,36 @@ public final class CombatController implements VisualEffectCompletedCallback {
 		ankiAttackPendingCompletion = false;
 	}
 
-	public void skipAnkiQuizTurn() {
-		if (!world.model.uiSelections.isPlayersCombatTurn) return;
+	/**
+	 * An incorrect Anki answer wastes this attack's AP, rather than the whole turn.
+	 * Keep the enemy untouched and ask another card if another attack is affordable.
+	 * The caller retains any pending Again retry until it is answered correctly.
+	 */
+	public void consumeAnkiFailedAttackAP() {
+		if (!world.model.uiSelections.isInCombat || !world.model.uiSelections.isPlayersCombatTurn) return;
+		if (controllers.effectController.isRunningVisualEffect()) {
+			new Handler().postDelayed(this::consumeAnkiFailedAttackAP, 100);
+			return;
+		}
 		ankiQuizGateActive = false;
-		endPlayerTurn();
+		if (useAPs(world.model.player.getAttackCost())) {
+			continueAfterAnkiAction();
+		} else {
+			// AP changed unexpectedly while the card was open. Do not end the turn
+			// while the player can still afford movement or an item.
+			playerActionCompleted();
+		}
+	}
+
+	/** Finish a completed card action, without replenishing the player's AP. */
+	private void continueAfterAnkiAction() {
+		playerActionCompleted();
+		if (!world.model.uiSelections.isInCombat || !world.model.uiSelections.isPlayersCombatTurn) return;
+		if (world.model.player.hasAPs(world.model.player.getAttackCost())) {
+			ankiQuizGateActive = true;
+			// Existing callback shows a new card (or an unresolved Again retry).
+			combatTurnListeners.onNewPlayerTurn();
+		}
 	}
 
 	public void executeAnkiQuizAttack() {
@@ -397,15 +423,7 @@ public final class CombatController implements VisualEffectCompletedCallback {
 
 		if (ankiAttackPendingCompletion) {
 			ankiAttackPendingCompletion = false;
-			// The normal AP check ends the turn only after AP is exhausted.
-			playerActionCompleted();
-			if (!world.model.uiSelections.isInCombat || !world.model.uiSelections.isPlayersCombatTurn) return;
-
-			if (world.model.player.hasAPs(world.model.player.getAttackCost())) {
-				// Anki-gate the next attack without refilling AP or starting a new round.
-				ankiQuizGateActive = true;
-				combatTurnListeners.onNewPlayerTurn();
-			}
+			continueAfterAnkiAction();
 			return;
 		}
 
