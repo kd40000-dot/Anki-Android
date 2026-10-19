@@ -1,4 +1,5 @@
 name: Build Leda Anki Audio Updater APK
+# Rebuild after Java compile fix and atomic output verification.
 
 on:
   push:
