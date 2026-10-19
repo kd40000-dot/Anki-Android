@@ -188,10 +188,10 @@ final class ApkgProcessor {
             offset++;
         }
         log.onStatus("Writing new Anki package; preserving "+p.cards+" cards and "+p.reviewLogs+" reviews…");
-        try(ZipFile src=new ZipFile(p.source);
-            OutputStream fileOut=context.getContentResolver().openOutputStream(output,"w")){
-            if(fileOut==null)throw new IOException("Could not open output document.");
-            try(ZipOutputStream out=new ZipOutputStream(new BufferedOutputStream(fileOut))){
+        File staged=new File(context.getCacheDir(),"leda-ready-"+System.currentTimeMillis()+".apkg");
+        try{
+            try(ZipFile src=new ZipFile(p.source);
+                ZipOutputStream out=new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(staged)))){
                 Enumeration<? extends ZipEntry> entries=src.entries();
                 byte[] buf=new byte[8192];
                 while(entries.hasMoreElements()){
@@ -218,7 +218,26 @@ final class ApkgProcessor {
                     out.closeEntry();
                 }
             }
-        }
+            // Verify the complete package before opening the user's destination document.
+            try(ZipFile verify=new ZipFile(staged)){
+                if(verify.getEntry("collection.anki21b")==null||verify.getEntry("media")==null)
+                    throw new IOException("Output archive is incomplete.");
+                byte[] checked=readAll(unpack(verify.getInputStream(verify.getEntry("media"))),40*1024*1024);
+                Map<String,MediaInfo> confirmed=readManifest(checked);
+                if(confirmed.size()!=p.media.size()+additions.size())
+                    throw new IOException("Exported media count does not match additions.");
+                for(MediaInfo item:confirmed.values()){
+                    if(verify.getEntry(String.valueOf(item.index))==null)
+                        throw new IOException("Exported package missing media entry "+item.index);
+                }
+            }
+            if(cancelled.get())throw new IOException("Cancelled before saving.");
+            try(InputStream ready=new BufferedInputStream(new FileInputStream(staged));
+                OutputStream saved=context.getContentResolver().openOutputStream(output,"w")){
+                if(saved==null)throw new IOException("Could not open selected output document.");
+                copy(ready,saved);
+            }
+        }finally{staged.delete();}
         log.onStatus("SUCCESS: "+p.edits.size()+" notes updated; "+additions.size()+
                      " new MP3s packaged; card IDs and review history preserved.");
     }
