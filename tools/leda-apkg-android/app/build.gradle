@@ -1,0 +1,19 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.anki.ledaaudio'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'com.anki.ledaaudio'
+        minSdk 26
+        targetSdk 28
+        versionCode 1
+        versionName '1.0'
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+dependencies {
+    implementation 'com.github.luben:zstd-jni:1.5.5-4@aar'
+}
