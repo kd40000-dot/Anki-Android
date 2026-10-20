@@ -1,4 +1,5 @@
 name: Build Leda Anki Audio Updater APK
+# v1.3 modern Anki SQLite unicase collation compatibility.
 # Credentials-picker recovery release, stable signing, safe diagnostics.
 # Rebuild after Java compile fix and atomic output verification.
 
@@ -20,7 +21,7 @@ jobs:
       - name: Checkout isolated Leda Android application
         uses: actions/checkout@v5
         with:
-          ref: fix/leda-class-initializer-2026-10-20
+          ref: fix/leda-unicase-sqlite-2026-10-20
           sparse-checkout: |
             tools/leda-apkg-android
             tools/fallback-release-keystore.jks
@@ -54,6 +55,10 @@ jobs:
           assert "static final Pattern SOUND=" not in apkg
           assert "static final Pattern CLOZE=" not in apkg
           assert "private static Pattern clozePattern()" in apkg
+          assert "verifyCollection(db,log);" in apkg
+          assert "PRAGMA integrity_check(" in apkg
+          assert "missingAnkiCollation(ex)" in apkg
+          assert "Original collection failed SQLite integrity check" not in apkg
           print("PASS: credentials import does not initialize APKG regex class")
           PY
 
