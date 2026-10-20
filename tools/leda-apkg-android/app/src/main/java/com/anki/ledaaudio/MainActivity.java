@@ -9,6 +9,7 @@ import android.view.*;
 import android.widget.*;
 import org.json.JSONObject;
 import java.nio.charset.StandardCharsets;
+import java.io.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class MainActivity extends Activity {
@@ -24,9 +25,11 @@ public final class MainActivity extends Activity {
     private Spinner mode;
     private Button analyzeButton,exportButton,cancelButton;
     private android.os.PowerManager.WakeLock wakeLock;
+    private String previousCrashNotice;
 
     @Override public void onCreate(Bundle saved){
         super.onCreate(saved);
+        installCrashReporter();
         getWindow().setStatusBarColor(Color.rgb(14,51,66));
         getWindow().setNavigationBarColor(Color.rgb(14,51,66));
         ScrollView scroll=new ScrollView(this);
@@ -84,7 +87,7 @@ public final class MainActivity extends Activity {
         cancelButton=button("Cancel current job");root.addView(cancelButton);
         cancelButton.setOnClickListener(v->{cancelled.set(true);status.setText("Cancelling after current request…");});
         section(root,"Progress / audit");
-        status=text("Select an .apkg file to begin.",13,false);
+        status=text(previousCrashNotice==null?"Select an .apkg file to begin.":previousCrashNotice,13,false);
         status.setTextIsSelectable(true);status.setPadding(dp(12),dp(12),dp(12),dp(12));
         status.setBackgroundColor(Color.WHITE);root.addView(status);
         updateButtons();
@@ -108,11 +111,18 @@ public final class MainActivity extends Activity {
     }
     private void choose(int request,String type){
         if(busy)return;
+        // Many Android document providers label .json as text/plain or octet-stream.
+        // Wildcard + EXTRA_MIME_TYPES is handled inconsistently by file picker apps.
         Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);
         i.addCategory(Intent.CATEGORY_OPENABLE);
-        i.setType(type);
-        i.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"application/zip","application/octet-stream","application/json","application/x-anki-package","*/*"});
-        startActivityForResult(i,request);
+        i.setType("*/*");
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try{
+            startActivityForResult(i,request);
+        }catch(RuntimeException e){
+            error(new IOException("Could not open the Android file picker ("+
+                e.getClass().getSimpleName()+"). Try the Files app or another document provider."));
+        }
     }
     private void updateButtons(){
         if(analyzeButton==null)return;
@@ -131,16 +141,7 @@ public final class MainActivity extends Activity {
                 status.setText("Ready to analyze. The original package stays unchanged.");
                 updateButtons();
             }else if(request==PICK_CREDENTIALS){
-                byte[] bytes=ApkgProcessor.readAll(getContentResolver().openInputStream(u),100000);
-                JSONObject parsed=new JSONObject(new String(bytes,StandardCharsets.UTF_8));
-                String type=parsed.optString("type");
-                if(!type.equals("authorized_user")&&!type.equals("service_account"))
-                    throw new IllegalArgumentException("Not a supported Google ADC credentials JSON.");
-                credentials=parsed;
-                if(!parsed.optString("quota_project_id").isEmpty())
-                    project.setText(parsed.optString("quota_project_id"));
-                credsLabel.setText("Google "+type+" credentials loaded into memory.");
-                status.setText("Credentials ready. They will NOT be embedded in exported APKG.");
+                importCredentials(u);
             }else if(request==PICK_AUDIO){
                 audioZipUri=u;audioLabel.setText("Selected: "+u.getLastPathSegment());
                 status.setText("Leda cache ZIP selected. Files will be matched by spoken Vietnamese text.");
@@ -153,6 +154,86 @@ public final class MainActivity extends Activity {
             }
         }catch(Exception e){error(e);}
     }
+    /**
+     * Run provider I/O and JSON parsing off the main/UI thread. Providers such as
+     * Downloads and Drive can take time to stream a selected document.
+     * No credential bytes, OAuth tokens or credential text are logged or persisted.
+     */
+    private void importCredentials(Uri uri){
+        if(busy)return;
+        launch(()->{
+            log("Reading Google credentials securely…");
+            byte[] bytes;
+            try(InputStream stream=getContentResolver().openInputStream(uri)){
+                if(stream==null)throw new IOException("The selected document provider returned no file.");
+                bytes=ApkgProcessor.readAll(stream,1024*1024);
+            }
+            JSONObject parsed;
+            try{
+                parsed=new JSONObject(new String(bytes,StandardCharsets.UTF_8));
+            }catch(Exception invalid){
+                throw new IOException("The selected file is not valid JSON. Select application_default_credentials.json.");
+            }
+            String type=parsed.optString("type");
+            if("authorized_user".equals(type)){
+                if(parsed.optString("refresh_token").isEmpty() ||
+                   parsed.optString("client_id").isEmpty() ||
+                   parsed.optString("client_secret").isEmpty())
+                    throw new IOException("ADC authorized_user JSON is missing required credentials. Run gcloud auth application-default login again.");
+            }else if("service_account".equals(type)){
+                if(parsed.optString("client_email").isEmpty() ||
+                   parsed.optString("private_key").isEmpty())
+                    throw new IOException("Service account JSON is missing client_email or private_key.");
+            }else{
+                throw new IOException("This is not a Google ADC authorized_user or service_account JSON. The filename alone is not sufficient.");
+            }
+            String quotaProject=parsed.optString("quota_project_id");
+            // Retain the previous valid credential until parsing/validation succeeds.
+            runOnUiThread(()->{
+                credentials=parsed;
+                if(!quotaProject.isEmpty())project.setText(quotaProject);
+                credsLabel.setText("Loaded Google "+type+" credentials (kept in memory only).");
+                status.setText("Credentials imported successfully. Ready to generate Leda audio.");
+            });
+        });
+    }
+
+    /**
+     * Minimal, credential-safe crash diagnostic shown on next app launch.
+     * Stores ONLY the exception class and application stack frame, never message
+     * text, paths, JSON or tokens. This also catches crashes outside the picker.
+     */
+    private void installCrashReporter(){
+        File report=new File(getFilesDir(),"last_crash.txt");
+        if(report.isFile()){
+            try(BufferedReader reader=new BufferedReader(new FileReader(report))){
+                String message=reader.readLine();
+                if(message!=null)previousCrashNotice="Previous crash: "+message+
+                    "\nIf it happens again, tell me this code (do not share your credentials).";
+            }catch(IOException ignored){}
+            report.delete();
+        }
+        Thread.UncaughtExceptionHandler previous=Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler((thread,throwable)->{
+            try{
+                String clazz=throwable.getClass().getSimpleName();
+                String frame="unknown";
+                for(StackTraceElement element:throwable.getStackTrace()){
+                    if(element.getClassName().startsWith("com.anki.ledaaudio.")){
+                        frame=element.getClassName().substring("com.anki.ledaaudio.".length())+
+                            ":"+element.getLineNumber();
+                        break;
+                    }
+                }
+                try(FileWriter writer=new FileWriter(report,false)){
+                    writer.write(clazz+" at "+frame+"\n");
+                }
+            }catch(Throwable ignored){}
+            if(previous!=null)previous.uncaughtException(thread,throwable);
+            else android.os.Process.killProcess(android.os.Process.myPid());
+        });
+    }
+
     private void launch(Worker action){
         busy=true;cancelled.set(false);updateButtons();
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
