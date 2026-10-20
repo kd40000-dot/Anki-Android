@@ -19,8 +19,16 @@ import java.util.regex.*;
 import java.util.zip.*;
 
 final class ApkgProcessor {
-    static final Pattern SOUND=Pattern.compile("\\[sound:([^\\]]+)\\]",Pattern.CASE_INSENSITIVE);
-    static final Pattern CLOZE=Pattern.compile("\\{\\{c\\d+::([^}:]+)(?:::[^}]*)?}}",Pattern.CASE_INSENSITIVE);
+    // Compile expressions only when deck processing actually needs them.
+    // ICU regex on Android rejects unmatched literal '}' at the end of cloze
+    // patterns. Escape both closing braces explicitly; never put these into
+    // a static initializer that can crash credentials selection.
+    private static Pattern soundPattern(){
+        return Pattern.compile("\\[sound:([^\\]]+)\\]",Pattern.CASE_INSENSITIVE);
+    }
+    private static Pattern clozePattern(){
+        return Pattern.compile("\\{\\{c\\d+::([^}:]+)(?:::[^}]*)?\\}\\}",Pattern.CASE_INSENSITIVE);
+    }
     static final int MISSING=0, ALL=1;
     interface Status{void onStatus(String message);}
     static final class MediaInfo {
@@ -34,7 +42,7 @@ final class ApkgProcessor {
         }
         String updatedFields(){
             String[] parts=fields.clone();
-            String remaining=SOUND.matcher(parts[audioField]).replaceAll("").trim();
+            String remaining=soundPattern().matcher(parts[audioField]).replaceAll("").trim();
             parts[audioField]=(remaining.isEmpty()?"":remaining+"\n")+"[sound:"+filename+"]";
             return String.join("\u001f",parts);
         }
@@ -83,7 +91,7 @@ final class ApkgProcessor {
                         String[] fields=cur.getString(1).split("\u001f",-1);
                         if(fields.length!=2 && fields.length!=3) continue; // unrecognized model: preserve
                         int targetField=fields.length==3?2:1;
-                        Matcher matcher=SOUND.matcher(fields[targetField]);
+                        Matcher matcher=soundPattern().matcher(fields[targetField]);
                         boolean soundFound=matcher.find();
                         boolean missing=!soundFound;
                         boolean broken=false,led=false;
@@ -270,8 +278,8 @@ final class ApkgProcessor {
         return out;
     }
     static String cleanVietnamese(String value,boolean sentence){
-        value=CLOZE.matcher(value).replaceAll("$1");
-        value=SOUND.matcher(value).replaceAll("");
+        value=clozePattern().matcher(value).replaceAll("$1");
+        value=soundPattern().matcher(value).replaceAll("");
         value=Html.fromHtml(value,Html.FROM_HTML_MODE_LEGACY).toString();
         value=value.replace('\u00a0',' ').replaceAll("\\s+"," ").trim();
         if(!sentence && value.contains("|"))value=value.split("\\|",2)[0].trim();
