@@ -20,7 +20,7 @@ jobs:
       - name: Checkout isolated Leda Android application
         uses: actions/checkout@v5
         with:
-          ref: fix/leda-credentials-picker-recovery-2026-10-20
+          ref: fix/leda-class-initializer-2026-10-20
           sparse-checkout: |
             tools/leda-apkg-android
             tools/fallback-release-keystore.jks
@@ -41,6 +41,21 @@ jobs:
         uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: '8.10.2'
+
+      - name: Regression guard for credentials import class initialization
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          src=Path("tools/leda-apkg-android/app/src/main/java/com/anki/ledaaudio")
+          main=(src/"MainActivity.java").read_text()
+          apkg=(src/"ApkgProcessor.java").read_text()
+          assert "bytes=readCredentialFile(stream);" in main
+          assert "bytes=ApkgProcessor.readAll(stream" not in main
+          assert "static final Pattern SOUND=" not in apkg
+          assert "static final Pattern CLOZE=" not in apkg
+          assert "private static Pattern clozePattern()" in apkg
+          print("PASS: credentials import does not initialize APKG regex class")
+          PY
 
       - name: Compile standalone Leda audio updater
         run: gradle -p tools/leda-apkg-android :app:assembleDebug --no-daemon --stacktrace
