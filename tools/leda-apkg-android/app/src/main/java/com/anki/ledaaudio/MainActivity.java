@@ -159,6 +159,21 @@ public final class MainActivity extends Activity {
      * Downloads and Drive can take time to stream a selected document.
      * No credential bytes, OAuth tokens or credential text are logged or persisted.
      */
+
+    /** Read credentials independently from all deck-processing code. */
+    private static byte[] readCredentialFile(InputStream stream) throws IOException {
+        ByteArrayOutputStream result=new ByteArrayOutputStream();
+        byte[] chunk=new byte[8192];
+        int count;
+        while((count=stream.read(chunk))!=-1){
+            if(result.size()+count>1024*1024)
+                throw new IOException("Credentials JSON is larger than 1 MB.");
+            result.write(chunk,0,count);
+        }
+        if(result.size()==0)throw new IOException("The selected credentials file was empty.");
+        return result.toByteArray();
+    }
+
     private void importCredentials(Uri uri){
         if(busy)return;
         launch(()->{
@@ -166,7 +181,8 @@ public final class MainActivity extends Activity {
             byte[] bytes;
             try(InputStream stream=getContentResolver().openInputStream(uri)){
                 if(stream==null)throw new IOException("The selected document provider returned no file.");
-                bytes=ApkgProcessor.readAll(stream,1024*1024);
+                // Avoid loading the entire APKG processor just to read JSON.
+                bytes=readCredentialFile(stream);
             }
             JSONObject parsed;
             try{
@@ -225,8 +241,10 @@ public final class MainActivity extends Activity {
                         break;
                     }
                 }
+                Throwable cause=throwable.getCause();
+                String reason=cause==null?"":" caused by "+cause.getClass().getSimpleName();
                 try(FileWriter writer=new FileWriter(report,false)){
-                    writer.write(clazz+" at "+frame+"\n");
+                    writer.write(clazz+" at "+frame+reason+"\n");
                 }
             }catch(Throwable ignored){}
             if(previous!=null)previous.uncaughtException(thread,throwable);
@@ -242,7 +260,7 @@ public final class MainActivity extends Activity {
         wakeLock.acquire(60*60*1000L);
         new Thread(()->{
             try{action.run();}
-            catch(Exception ex){runOnUiThread(()->error(ex));}
+            catch(Exception | LinkageError ex){runOnUiThread(()->error(ex));}
             finally{
                 runOnUiThread(()->{
                     busy=false;updateButtons();
@@ -291,8 +309,13 @@ public final class MainActivity extends Activity {
         String projectId=project.getText().toString().trim();
         launch(()->ApkgProcessor.build(this,current,output,previousAudio,googleCred,projectId,this::log,cancelled));
     }
-    private void error(Exception ex){
-        String msg=ex.getMessage();if(msg==null||msg.trim().isEmpty())msg=ex.toString();
+    private void error(Throwable ex){
+        String msg=ex.getMessage();
+        if(ex instanceof LinkageError){
+            Throwable cause=ex.getCause();
+            msg=ex.getClass().getSimpleName()+
+                (cause==null?"":" (cause: "+cause.getClass().getSimpleName()+")");
+        }else if(msg==null||msg.trim().isEmpty())msg=ex.toString();
         status.setText("ERROR: "+msg+"\n\nYour original .apkg has not been edited. Reopen a fresh source export to retry after a failed build.");
     }
     @Override protected void onDestroy(){
