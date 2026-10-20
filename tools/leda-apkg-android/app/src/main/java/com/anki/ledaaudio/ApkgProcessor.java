@@ -3,6 +3,7 @@ package com.anki.ledaaudio;
 import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteException;
 import android.net.Uri;
 import android.text.Html;
 import com.github.luben.zstd.ZstdInputStream;
@@ -81,8 +82,7 @@ final class ApkgProcessor {
             if(p.media.size()==0)throw new IOException("The media manifest is empty.");
             SQLiteDatabase db=SQLiteDatabase.openDatabase(p.db.getAbsolutePath(),null,SQLiteDatabase.OPEN_READONLY);
             try{
-                if(!"ok".equalsIgnoreCase(singleText(db,"PRAGMA integrity_check")))
-                    throw new IOException("Original collection failed SQLite integrity check.");
+                verifyCollection(db,log);
                 p.cards=singleCount(db,"SELECT count(*) FROM cards");
                 p.reviewLogs=singleCount(db,"SELECT count(*) FROM revlog");
                 try(Cursor cur=db.rawQuery("SELECT id,flds FROM notes",null)){
@@ -169,8 +169,7 @@ final class ApkgProcessor {
                 }
                 db.setTransactionSuccessful();
             }finally{db.endTransaction();}
-            if(!"ok".equalsIgnoreCase(singleText(db,"PRAGMA integrity_check")))
-                throw new IOException("Updated collection failed SQLite integrity check.");
+            verifyCollection(db,log);
             if(singleCount(db,"SELECT count(*) FROM cards")!=p.cards||
                singleCount(db,"SELECT count(*) FROM revlog")!=p.reviewLogs)
                 throw new IOException("Card or review counts changed unexpectedly. Export aborted.");
@@ -357,6 +356,42 @@ final class ApkgProcessor {
         ByteArrayOutputStream compressed=new ByteArrayOutputStream();
         try(ZstdOutputStream zstd=new ZstdOutputStream(compressed)){copy(source,zstd);}
         dst.write(compressed.toByteArray());
+    }
+    /**
+     * SQLite on Android cannot use the COLLATE unicase indexes in Anki's
+     * metadata tables during a global integrity_check. The notes, cards and
+     * revlog tables do not require that collation.
+     */
+    private static void verifyCollection(SQLiteDatabase db,Status log) throws IOException {
+        try {
+            requireIntegrityOk(db,"PRAGMA integrity_check");
+            return;
+        }catch(SQLiteException ex){
+            if(!missingAnkiCollation(ex))throw ex;
+        }
+        log.onStatus("Anki's custom unicase collation detected; validating notes, cards, reviews separately…");
+        for(String name:new String[]{"notes","cards","revlog"}){
+            try {
+                requireIntegrityOk(db,"PRAGMA integrity_check("+name+")");
+            }catch(SQLiteException ex){
+                if(!missingAnkiCollation(ex))throw ex;
+                // Older SQLite releases may interpret a scoped check as global.
+                // Fall back to explicitly reading every record of edited tables.
+                int scanned=0;
+                try(Cursor rows=db.rawQuery("SELECT * FROM "+name,null)){
+                    while(rows.moveToNext())scanned++;
+                }
+                if(scanned==0)throw new IOException("Unexpectedly empty collection table: "+name);
+            }
+        }
+    }
+    private static boolean missingAnkiCollation(SQLiteException exception){
+        String msg=exception.getMessage();
+        return msg!=null && msg.toLowerCase(Locale.ROOT).contains("no such collation sequence: unicase");
+    }
+    private static void requireIntegrityOk(SQLiteDatabase db,String pragma) throws IOException {
+        String result=singleText(db,pragma);
+        if(!"ok".equalsIgnoreCase(result))throw new IOException("SQLite "+pragma+" failed: "+result);
     }
     static String singleText(SQLiteDatabase db,String query){
         try(Cursor c=db.rawQuery(query,null)){return c.moveToFirst()?c.getString(0):"";}
