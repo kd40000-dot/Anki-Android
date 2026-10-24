@@ -45,6 +45,23 @@ public final class CombatController implements VisualEffectCompletedCallback {
 	private boolean ankiQuizGateActive = false;
 	// Tracks a card-approved attack through its animation and AP accounting.
 	private boolean ankiAttackPendingCompletion = false;
+	// Escape is an ongoing player choice, not an Anki attack. Keep it active
+	// through failed flee rolls and intervening monster rounds until the
+	// player exits combat or explicitly elects to attack again.
+	private boolean fleeingWithoutAnki = false;
+
+	public boolean isFleeingWithoutAnki() { return fleeingWithoutAnki; }
+
+	/** Return to Anki-gated attacks after explicitly choosing an attack. */
+	public void stopFleeAndRequestAttack() {
+		if (!fleeingWithoutAnki) return;
+		if (!world.model.uiSelections.isInCombat || !world.model.uiSelections.isPlayersCombatTurn) return;
+		if (world.model.uiSelections.selectedMonster == null) return;
+		fleeingWithoutAnki = false;
+		ankiCombatSession.bypassForCurrentTurn = false;
+		// Notify combat UI to fetch a question before executing any attack.
+		combatTurnListeners.onNewPlayerTurn();
+	}
 
 	/**
 	 * Retained Anki-combat state. CombatController belongs to the application ControllerContext,
@@ -142,6 +159,7 @@ public final class CombatController implements VisualEffectCompletedCallback {
 		resetCombatState();
 
 		if (whoseTurn != BeginTurnAs.continueLastTurn) {
+			fleeingWithoutAnki = false;
 			ankiQuizGateActive = false;
 			ankiCombatSession.resetAll();
 		} else if (ankiCombatSession.phase != AnkiCombatSession.Phase.IDLE
@@ -159,6 +177,7 @@ public final class CombatController implements VisualEffectCompletedCallback {
 		exitCombat(pickupLootBags, false);
 	}
 	public void exitCombat(boolean pickupLootBags, boolean canceledCombat) {
+		fleeingWithoutAnki = false;
 		ankiQuizGateActive = false;
 		ankiAttackPendingCompletion = false;
 		ankiCombatSession.resetAll();
@@ -269,8 +288,20 @@ public final class CombatController implements VisualEffectCompletedCallback {
 	}
 
 	public void executeMoveAttack(int dx, int dy) {
-		if (ankiQuizGateActive) return;
 		if (!world.model.uiSelections.isPlayersCombatTurn) return;
+		// While escaping, directional input always means flee -- never attack,
+		// even if an adjacent aggressor was restored to the combat header.
+		if (fleeingWithoutAnki) {
+			if (dx == 0 && dy == 0 && world.model.uiSelections.selectedMonster != null) {
+				stopFleeAndRequestAttack();
+			} else if (canExitCombat()) {
+				exitCombat(true);
+			} else if (dx != 0 || dy != 0) {
+				executeFlee(dx, dy);
+			}
+			return;
+		}
+		if (ankiQuizGateActive) return;
 
 		if (world.model.uiSelections.selectedMonster != null) {
 			executePlayerAttack();
@@ -501,7 +532,7 @@ public final class CombatController implements VisualEffectCompletedCallback {
 	}
 
 	private void executeCombatMove(final Coord dest) {
-		if (world.model.uiSelections.selectedMonster != null) return;
+		if (world.model.uiSelections.selectedMonster != null && !fleeingWithoutAnki) return;
 		if (dest == null) return;
 		if (!useAPs(world.model.player.getMoveCost())) return;
 
@@ -519,6 +550,9 @@ public final class CombatController implements VisualEffectCompletedCallback {
 		world.model.player.nextPosition.set(dest);
 		controllers.movementController.moveToNextIfPossible();
 
+		// In a multi-enemy fight the old monster may no longer be adjacent,
+		// while another one still is. Keep its status/header selected.
+		if (fleeingWithoutAnki) selectNextAggressiveMonster();
 		playerActionCompleted();
 	}
 
@@ -877,14 +911,15 @@ public final class CombatController implements VisualEffectCompletedCallback {
 	}
 
 	public void startFlee() {
-		if (ankiQuizGateActive) {
-			// Fleeing is an explicit escape from the unresolved quiz. Do not submit
-			// any Anki review; just discard the in-combat attempt and unlock combat.
-			ankiCombatSession.resetAll();
-			ankiCombatSession.bypassForCurrentTurn = true;
-			ankiQuizGateActive = false;
-			ankiAttackPendingCompletion = false;
-		}
+		if (!world.model.uiSelections.isInCombat || !world.model.uiSelections.isPlayersCombatTurn) return;
+		// Flee is always independent of a card. Cancel the unresolved prompt
+		// (including in-flight card-loading callbacks) without submitting a review.
+		// Keep escaping after failed rolls and when another enemy stays in range.
+		fleeingWithoutAnki = true;
+		ankiCombatSession.resetAll();
+		ankiCombatSession.bypassForCurrentTurn = true;
+		ankiQuizGateActive = false;
+		ankiAttackPendingCompletion = false;
 		setCombatSelection(null, null);
 		combatActionListeners.onPlayerStartedFleeing();
 	}
