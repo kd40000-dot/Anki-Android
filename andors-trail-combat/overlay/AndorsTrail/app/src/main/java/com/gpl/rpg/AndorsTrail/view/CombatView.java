@@ -139,7 +139,12 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		//Enable marquee if text is too long.
 		attackMoveButton.setSelected(true);
 		attackMoveButton.setOnClickListener((View v) -> {
-			c.executeMoveAttack(0, 0);
+			if (c.isFleeingWithoutAnki() && world.model.uiSelections.selectedMonster != null) {
+				// Attacking after escaping still requires a card, never a free hit.
+				c.stopFleeAndRequestAttack();
+			} else {
+				c.executeMoveAttack(0, 0);
+			}
 			MainView mv = ((MainActivity) getContext()).getMainView();
 			mv.post(mv::requestFocus);
 		});
@@ -157,6 +162,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		fleeButton.setSelected(true);
 		fleeButton.setOnClickListener((View v) -> {
 			c.startFlee();
+			syncAnkiUiFromSession(false);
 			// After fleeing, set the focus back to the main view so the player can choose a direction.
 			MainView mv = ((MainActivity) getContext()).getMainView();
 			mv.post(mv::requestFocus);
@@ -204,6 +210,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 			ankiFlee.setVisibility(View.GONE);
 			actionBar.setVisibility(View.VISIBLE);
 			controllers.combatController.startFlee();
+			syncAnkiUiFromSession(false);
 			MainView mv = ((MainActivity) getContext()).getMainView();
 			mv.post(mv::requestFocus);
 		});
@@ -506,7 +513,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 
 	private void loadAnkiCardForPlayerTurn() {
 		if (!world.model.uiSelections.isInCombat || !world.model.uiSelections.isPlayersCombatTurn) return;
-		if (ankiSession.bypassForCurrentTurn) {
+		if (controllers.combatController.isFleeingWithoutAnki() || ankiSession.bypassForCurrentTurn) {
 			controllers.combatController.setAnkiQuizGateActive(false);
 			ankiQuiz.setVisibility(View.GONE);
 			actionBar.setVisibility(View.VISIBLE);
@@ -762,6 +769,18 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		if (!world.model.uiSelections.isPlayersCombatTurn) {
 			ankiQuiz.setVisibility(View.GONE);
 			hideAnkiKeyboardAndClearFocus();
+			return;
+		}
+		// Keep the flee bar visible until the player chooses an attack or leaves
+		// combat. Failed flee rolls and a second adjacent monster must not
+		// automatically restore the Anki card UI.
+		if (controllers.combatController.isFleeingWithoutAnki()) {
+			controllers.combatController.setAnkiQuizGateActive(false);
+			ankiQuiz.setVisibility(View.GONE);
+			ankiFlee.setVisibility(View.GONE);
+			hideAnkiKeyboardAndClearFocus();
+			actionBar.setVisibility(View.VISIBLE);
+			monsterActionText.setVisibility(View.GONE);
 			return;
 		}
 
@@ -1056,6 +1075,10 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 
 		long age = System.currentTimeMillis() - ankiSession.phaseStartedAt;
 
+		if (controllers.combatController.isFleeingWithoutAnki()) {
+			syncAnkiUiFromSession(false);
+			return;
+		}
 		if (ankiSession.phase == CombatController.AnkiCombatSession.Phase.IDLE) {
 			if (!ankiSession.bypassForCurrentTurn) loadAnkiCardForPlayerTurn();
 			return;
@@ -1107,9 +1130,9 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 			monsterActionText.setText(res.getString(R.string.combat_monsteraction, currentActiveMonster.getName()));
 		} else {
 			actionBar.setVisibility(
-					ankiSession.phase == CombatController.AnkiCombatSession.Phase.IDLE
-							? View.VISIBLE
-							: View.GONE);
+					controllers.combatController.isFleeingWithoutAnki()
+						|| ankiSession.phase == CombatController.AnkiCombatSession.Phase.IDLE
+						? View.VISIBLE : View.GONE);
 			monsterActionText.setVisibility(View.GONE);
 		}
 	}
@@ -1286,6 +1309,14 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 
 	@Override
 	public void onNewPlayerTurn() {
+		if (controllers.combatController.isFleeingWithoutAnki()) {
+			// No flashcard to escape. Preserve the normal combat controls through
+			// failed attempts and successive monster rounds.
+			ankiSession.bypassForCurrentTurn = true;
+			updateTurnInfo(null);
+			syncAnkiUiFromSession(false);
+			return;
+		}
 		ankiSession.bypassForCurrentTurn = false;
 		updateTurnInfo(null);
 		loadAnkiCardForPlayerTurn();
