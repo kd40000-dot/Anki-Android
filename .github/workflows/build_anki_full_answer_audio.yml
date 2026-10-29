@@ -30,7 +30,7 @@ jobs:
       - name: Checkout free-flee Anki combat overlay
         uses: actions/checkout@v5
         with:
-          ref: fix/anki-full-answer-audio-2026-10-29
+          ref: feature/anki-combat-momentum-2026-10-29
           sparse-checkout: |
             andors-trail-combat
             tools
