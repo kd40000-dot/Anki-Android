@@ -2,6 +2,15 @@ package com.gpl.rpg.AndorsTrail.view;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.content.Intent;
+import android.Manifest;
+import android.content.pm.PackageManager;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
+import android.os.Bundle;
+import java.util.ArrayList;
+import java.util.Locale;
 import android.content.res.ColorStateList;
 import android.content.res.Resources;
 import android.graphics.Color;
@@ -74,6 +83,10 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	private final TextView ankiWordTranslation;
 	private final AnkiWordTranslator ankiWordTranslator = new AnkiWordTranslator();
 	private final EditText ankiInput;
+	private final Button ankiMic;
+	private SpeechRecognizer ankiSpeechRecognizer;
+	private boolean ankiListening = false;
+	private long speechOperation = -1L;
 	private final Button ankiReveal;
 	private final TextView ankiFeedback;
 	private final TextView ankiAnswer;
@@ -200,6 +213,21 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		ankiQuestion = (TextView) findViewById(R.id.combatview_anki_question);
 		ankiWordTranslation = (TextView) findViewById(R.id.combatview_anki_word_translation);
 		ankiInput = (EditText) findViewById(R.id.combatview_anki_input);
+		ankiMic = new Button(context);
+		ankiMic.setText("🎤 Speak Vietnamese");
+		ankiMic.setAllCaps(false);
+		ankiMic.setTextSize(13);
+		ankiMic.setOnClickListener((View view) -> beginVietnameseSpeech());
+		// Add below the existing input without requiring changes to the game's
+		// fixed-size combat layout or moving the Flee control.
+		if (ankiInput.getParent() instanceof ViewGroup) {
+			ViewGroup parent = (ViewGroup) ankiInput.getParent();
+			if (parent instanceof LinearLayout) {
+				((LinearLayout) parent).addView(ankiMic, parent.indexOfChild(ankiInput) + 1);
+			} else {
+				ankiQuiz.addView(ankiMic);
+			}
+		}
 		ankiReveal = (Button) findViewById(R.id.combatview_anki_reveal);
 		ankiFeedback = (TextView) findViewById(R.id.combatview_anki_feedback);
 		ankiAnswer = (TextView) findViewById(R.id.combatview_anki_answer);
@@ -512,6 +540,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	}
 
 	private void beginAnkiQuestion(AnkiCombatReviewClient.ReviewCard card) {
+		stopVietnameseSpeech();
 		rapidWaitingForNextCard = false;
 		releaseAnkiAudio();
 		ankiSession.bypassForCurrentTurn = false;
@@ -669,6 +698,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 			ankiInput.setVisibility(View.VISIBLE);
 		} else {
 			ankiInput.setVisibility(View.GONE);
+			ankiMic.setVisibility(View.GONE);
 			hideKeyboardIfQuizInputNotVisible();
 		}
 		ankiReveal.setVisibility(View.GONE);
@@ -696,6 +726,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		setInputTextWithoutWatcher(ankiSession.typedText);
 		ankiInput.setEnabled(true);
 		ankiInput.setVisibility(View.VISIBLE);
+		ankiMic.setVisibility(View.VISIBLE);
 		ankiReveal.setEnabled(true);
 		ankiReveal.setVisibility(View.VISIBLE);
 		ankiFeedback.setVisibility(View.GONE);
@@ -734,6 +765,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		ankiInput.setEnabled(true);
 		ankiInput.setVisibility(View.VISIBLE);
 		ankiReveal.setVisibility(View.GONE);
+		ankiMic.setVisibility(View.GONE);
 
 		// The highlighted comparison itself is the feedback. Keep the old feedback
 		// view hidden; the integrated game UI does not need separate result labels.
@@ -912,6 +944,92 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	 * and incorrect answers still show comparison and normal manual ratings.
 	 * No extra Anki reviews are created.
 	 */
+	/** Speech recognition uses Android's installed service. No audio is stored by
+	 * the game; recognition may use network services depending on the device. */
+	private void beginVietnameseSpeech() {
+		if (ankiSession.phase != CombatController.AnkiCombatSession.Phase.QUESTION) return;
+		if (ankiListening) { stopVietnameseSpeech(); return; }
+		if (android.os.Build.VERSION.SDK_INT >= 23
+				&& getContext().checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+				!= PackageManager.PERMISSION_GRANTED) {
+			((MainActivity) getContext()).requestPermissions(
+					new String[]{Manifest.permission.RECORD_AUDIO}, 7103);
+			return;
+		}
+		startVietnameseRecognizer();
+	}
+
+	public void onVietnameseMicrophonePermissionResult(boolean granted) {
+		if (granted) startVietnameseRecognizer();
+		else Toast.makeText(getContext(), "Microphone permission denied. You can type instead.", Toast.LENGTH_SHORT).show();
+	}
+
+	private void startVietnameseRecognizer() {
+		if (!isAttachedToWindow()
+				|| ankiSession.phase != CombatController.AnkiCombatSession.Phase.QUESTION) return;
+		if (!SpeechRecognizer.isRecognitionAvailable(getContext())) {
+			Toast.makeText(getContext(), "No Android speech recognizer is installed. Type your answer instead.", Toast.LENGTH_LONG).show();
+			return;
+		}
+		stopVietnameseSpeech();
+		speechOperation = ankiSession.operationId;
+		try {
+			ankiSpeechRecognizer = SpeechRecognizer.createSpeechRecognizer(getContext());
+			ankiSpeechRecognizer.setRecognitionListener(new RecognitionListener() {
+				@Override public void onReadyForSpeech(Bundle params) {
+					ankiMic.setText("🎙 Listening… Tap to stop");
+				}
+				@Override public void onBeginningOfSpeech() {}
+				@Override public void onRmsChanged(float rmsdB) {}
+				@Override public void onBufferReceived(byte[] buffer) {}
+				@Override public void onEndOfSpeech() { ankiMic.setText("Recognizing Vietnamese…"); }
+				@Override public void onError(int error) {
+					stopVietnameseSpeech();
+					Toast.makeText(getContext(), "Speech not recognized ("+error+"). Try again or type.", Toast.LENGTH_SHORT).show();
+				}
+				@Override public void onResults(Bundle results) {
+					ArrayList<String> candidates = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+					boolean sameQuestion = ankiSession.phase == CombatController.AnkiCombatSession.Phase.QUESTION
+							&& speechOperation == ankiSession.operationId;
+					stopVietnameseSpeech();
+					if (!sameQuestion || candidates == null || candidates.isEmpty()) return;
+					// The first hypothesis is displayed, never auto-submitted: accents
+					// and names may be misrecognized and should be correctable by typing.
+					setInputTextWithoutWatcher(candidates.get(0));
+					ankiSession.typedText = candidates.get(0);
+					ankiInput.setSelection(ankiInput.length());
+					ankiStatus.setText("Heard: "+candidates.get(0)+" — tap Check or edit.");
+					ankiStatus.setVisibility(View.VISIBLE);
+				}
+				@Override public void onPartialResults(Bundle partialResults) {}
+				@Override public void onEvent(int eventType,Bundle params) {}
+			});
+			Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+			intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+			intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "vi-VN");
+			intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "vi-VN");
+			intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+			intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
+			intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true);
+			ankiListening=true;
+			ankiMic.setText("🎙 Listening… Tap to stop");
+			hideAnkiKeyboardAndClearFocus();
+			ankiSpeechRecognizer.startListening(intent);
+		} catch(Exception e) {
+			stopVietnameseSpeech();
+			Toast.makeText(getContext(), "Cannot start Vietnamese speech input. Please type instead.", Toast.LENGTH_SHORT).show();
+		}
+	}
+
+	private void stopVietnameseSpeech() {
+		ankiListening=false;
+		ankiMic.setText("🎤 Speak Vietnamese");
+		if (ankiSpeechRecognizer != null) {
+			ankiSpeechRecognizer.destroy();
+			ankiSpeechRecognizer=null;
+		}
+	}
+
 	private void submitRapidFireAnswer() {
 		if (ankiSession.phase != CombatController.AnkiCombatSession.Phase.QUESTION) return;
 		revealAnkiAnswer();
@@ -922,6 +1040,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	}
 
 	private void revealAnkiAnswer() {
+		stopVietnameseSpeech();
 		if (ankiSession.phase != CombatController.AnkiCombatSession.Phase.QUESTION
 				|| ankiSession.card == null) return;
 
@@ -1365,6 +1484,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 
 	@Override
 	public void onCombatEnded() {
+		stopVietnameseSpeech();
 		rapidWaitingForNextCard = false;
 		rapidNextCard = null;
 		ankiQuiz.setVisibility(View.GONE);
@@ -1465,6 +1585,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	}
 	@Override
 	protected void onDetachedFromWindow() {
+		stopVietnameseSpeech();
 		ankiWordTranslator.close();
 		releaseAnkiAudio();
 		super.onDetachedFromWindow();
