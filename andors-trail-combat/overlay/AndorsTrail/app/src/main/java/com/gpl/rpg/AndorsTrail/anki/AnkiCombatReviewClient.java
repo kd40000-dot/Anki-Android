@@ -56,6 +56,44 @@ public final class AnkiCombatReviewClient {
         }
     }
 
+    /** Reads current AnkiDroid deck on demand, not a bundled stale wordlist.
+     * The provider's deck-scoped browser search also includes child decks.
+     */
+    public java.util.List<String> getSelectedDeckVietnameseVocabulary(ContentResolver resolver) {
+        java.util.LinkedHashSet<String> terms = new java.util.LinkedHashSet<>();
+        Uri selected = Uri.parse("content://" + AUTHORITY + "/selected_deck/");
+        String deckName = "";
+        try (Cursor c = resolver.query(selected, new String[]{"name"}, null, null, null)) {
+            if (c != null && c.moveToFirst()) deckName = c.getString(0);
+        }
+        if (deckName == null || deckName.trim().isEmpty()) return new java.util.ArrayList<>(terms);
+        // Escape browser query quotation and backslashes.
+        String query = "deck:\"" + deckName.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+        Uri notes = Uri.parse("content://" + AUTHORITY + "/notes");
+        try (Cursor c = resolver.query(notes, new String[]{"flds"}, query, null, null)) {
+            if (c != null) {
+                while (c.moveToNext() && terms.size() < 4000) {
+                    String fields = c.getString(0);
+                    if (fields == null) continue;
+                    for (String raw : fields.split("\\u001f")) {
+                        // Ignore audio filenames, markup, and long cloze/sentence material.
+                        String clean = htmlToText(raw);
+                        for (String alternative : clean.split("\\|")) {
+                            String word = alternative.trim();
+                            if (word.length() > 1 && word.length() < 55 &&
+                                word.split("\\s+").length <= 5 &&
+                                word.matches("(?U)[\\p{L}\\p{M}\\s'’.,-]+") &&
+                                word.matches(".*[ăâđêôơưĂÂĐÊÔƠƯàáảãạằắẳẵặầấẩẫậèéẻẽẹềếểễệìíỉĩịòóỏõọồốổỗộờớởỡợùúủũụừứửữựỳýỷỹỵ].*")) {
+                                terms.add(word.toLowerCase(Locale.ROOT));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return new java.util.ArrayList<>(terms);
+    }
+
     public ReviewCard getNextCard(ContentResolver resolver) {
         long noteId;
         int cardOrd;
