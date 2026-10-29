@@ -998,8 +998,15 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 					setInputTextWithoutWatcher(candidates.get(0));
 					ankiSession.typedText = candidates.get(0);
 					ankiInput.setSelection(ankiInput.length());
-					ankiStatus.setText("Heard: "+candidates.get(0)+" — tap Check or edit.");
-					ankiStatus.setVisibility(View.VISIBLE);
+					if (ankiSession.card != null
+							&& ankiClient.isCorrect(candidates.get(0), ankiSession.card.answer)) {
+						// Correct speech follows exactly the same one-review-per-attack
+						// check as typed Enter, without an additional tap.
+						submitRapidFireAnswer();
+					} else {
+						ankiStatus.setText("Heard: "+candidates.get(0)+" — edit or tap Check.");
+						ankiStatus.setVisibility(View.VISIBLE);
+					}
 				}
 				@Override public void onPartialResults(Bundle partialResults) {}
 				@Override public void onEvent(int eventType,Bundle params) {}
