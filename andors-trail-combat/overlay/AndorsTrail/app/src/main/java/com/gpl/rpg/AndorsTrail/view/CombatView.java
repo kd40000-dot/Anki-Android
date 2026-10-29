@@ -94,6 +94,9 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	// saved. It overlaps the next-card lookup with the attack animation without
 	// assuming or reserving cards before the scheduler has advanced.
 	private volatile java.util.concurrent.FutureTask<AnkiCombatReviewClient.ReviewCard> rapidNextCard;
+	// Keep the focused typing field mounted while a successful attack animates
+	// and the following Anki card is fetched, avoiding repeated IME dismissal.
+	private boolean rapidWaitingForNextCard = false;
 
 	private final Runnable ankiHealthCheck = new Runnable() {
 		@Override
@@ -165,6 +168,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		//Enable marquee if text is too long.
 		fleeButton.setSelected(true);
 		fleeButton.setOnClickListener((View v) -> {
+			rapidWaitingForNextCard = false;
 			rapidNextCard = null;
 			c.startFlee();
 			syncAnkiUiFromSession(false);
@@ -210,6 +214,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		configureRatingButtonColors();
 
 		ankiFlee.setOnClickListener((View v) -> {
+			rapidWaitingForNextCard = false;
 			rapidNextCard = null;
 			hideAnkiKeyboardAndClearFocus();
 			ankiQuiz.setVisibility(View.GONE);
@@ -507,6 +512,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	}
 
 	private void beginAnkiQuestion(AnkiCombatReviewClient.ReviewCard card) {
+		rapidWaitingForNextCard = false;
 		releaseAnkiAudio();
 		ankiSession.bypassForCurrentTurn = false;
 		ankiSession.card = card;
@@ -658,8 +664,13 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		prepareQuizFrame();
 		ankiStatus.setText(ankiSession.errorMessage.isEmpty() ? "Loading Anki card…" : ankiSession.errorMessage);
 		ankiWordTranslator.reset(ankiQuestion, ankiWordTranslation);
-		ankiInput.setVisibility(View.GONE);
-		hideKeyboardIfQuizInputNotVisible();
+		if (rapidWaitingForNextCard) {
+			setInputTextWithoutWatcher("");
+			ankiInput.setVisibility(View.VISIBLE);
+		} else {
+			ankiInput.setVisibility(View.GONE);
+			hideKeyboardIfQuizInputNotVisible();
+		}
 		ankiReveal.setVisibility(View.GONE);
 		ankiFeedback.setVisibility(View.GONE);
 		ankiAnswer.setVisibility(View.GONE);
@@ -794,6 +805,21 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 
 		switch (ankiSession.phase) {
 			case IDLE:
+				if (rapidWaitingForNextCard && !controllers.combatController.isFleeingWithoutAnki()) {
+					prepareQuizFrame();
+					ankiQuestion.setText("Attacking…");
+					ankiWordTranslator.reset(ankiQuestion, ankiWordTranslation);
+					ankiQuestion.setText("Attacking…");
+					ankiStatus.setText("Next card loading…");
+					ankiStatus.setVisibility(View.VISIBLE);
+					setInputTextWithoutWatcher("");
+					ankiInput.setVisibility(View.VISIBLE);
+					ankiReveal.setVisibility(View.GONE);
+					ankiFeedback.setVisibility(View.GONE);
+					ankiAnswer.setVisibility(View.GONE);
+					ankiRatings.setVisibility(View.GONE);
+					return;
+				}
 				controllers.combatController.setAnkiQuizGateActive(false);
 				ankiQuiz.setVisibility(View.GONE);
 				ankiFlee.setVisibility(View.GONE);
@@ -1006,6 +1032,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		int recordedEase = ankiSession.pendingEffectiveEase;
 		controllers.combatController.setLastAnkiRecordedEase(recordedEase);
 		ankiSession.resetAll();
+		rapidWaitingForNextCard = shouldAttack;
 		// Prevent the watchdog from loading another card in the small window before
 		// the attack/failed-attempt transition completes.
 		ankiSession.bypassForCurrentTurn = true;
@@ -1140,6 +1167,8 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	}
 
 	private void fallbackToNormalCombat(String message) {
+		rapidWaitingForNextCard = false;
+		rapidNextCard = null;
 		controllers.combatController.resetAnkiQuizAndUnlockCombat();
 		ankiSession.bypassForCurrentTurn = true;
 		ankiQuiz.setVisibility(View.GONE);
@@ -1336,6 +1365,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 
 	@Override
 	public void onCombatEnded() {
+		rapidWaitingForNextCard = false;
 		rapidNextCard = null;
 		ankiQuiz.setVisibility(View.GONE);
 		ankiFlee.setVisibility(View.GONE);
