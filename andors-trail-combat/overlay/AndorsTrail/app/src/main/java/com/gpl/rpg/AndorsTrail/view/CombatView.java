@@ -90,6 +90,10 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	private final Handler ankiMainHandler = new Handler(Looper.getMainLooper());
 	private boolean suppressAnkiTextWatcher = false;
 	private long lastSubmissionProbeOperation = -1L;
+	// Read-ahead begins only AFTER AnkiDroid confirms the previous review was
+	// saved. It overlaps the next-card lookup with the attack animation without
+	// assuming or reserving cards before the scheduler has advanced.
+	private volatile java.util.concurrent.FutureTask<AnkiCombatReviewClient.ReviewCard> rapidNextCard;
 
 	private final Runnable ankiHealthCheck = new Runnable() {
 		@Override
@@ -161,6 +165,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		//Enable marquee if text is too long.
 		fleeButton.setSelected(true);
 		fleeButton.setOnClickListener((View v) -> {
+			rapidNextCard = null;
 			c.startFlee();
 			syncAnkiUiFromSession(false);
 			// After fleeing, set the focus back to the main view so the player can choose a direction.
@@ -205,6 +210,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		configureRatingButtonColors();
 
 		ankiFlee.setOnClickListener((View v) -> {
+			rapidNextCard = null;
 			hideAnkiKeyboardAndClearFocus();
 			ankiQuiz.setVisibility(View.GONE);
 			ankiFlee.setVisibility(View.GONE);
@@ -539,11 +545,13 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		syncAnkiUiFromSession(false);
 
 		final android.content.ContentResolver resolver = getContext().getApplicationContext().getContentResolver();
+		final java.util.concurrent.FutureTask<AnkiCombatReviewClient.ReviewCard> readAhead = rapidNextCard;
+		rapidNextCard = null;
 		new Thread(() -> {
 			AnkiCombatReviewClient.ReviewCard loaded = null;
 			Exception failure = null;
 			try {
-				loaded = ankiClient.getNextCard(resolver);
+				loaded = readAhead == null ? ankiClient.getNextCard(resolver) : readAhead.get();
 			} catch (Exception e) {
 				failure = e;
 			}
@@ -980,6 +988,18 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		}, "AnkiCombatRatingSave").start();
 	}
 
+	/** Begin the next read-only query after scheduling was committed. */
+	private void prefetchRapidCardAfterCommit() {
+		if (rapidNextCard != null) return;
+		if (!world.model.uiSelections.isInCombat || controllers.combatController.isFleeingWithoutAnki()) return;
+		final android.content.ContentResolver resolver =
+				getContext().getApplicationContext().getContentResolver();
+		java.util.concurrent.FutureTask<AnkiCombatReviewClient.ReviewCard> next =
+				new java.util.concurrent.FutureTask<>(() -> ankiClient.getNextCard(resolver));
+		rapidNextCard = next;
+		new Thread(next, "AnkiCombatRapidReadAhead").start();
+	}
+
 	private void finishSubmittedReview(long operation) {
 		if (operation != ankiSession.operationId) return;
 		boolean shouldAttack = ankiSession.pendingShouldAttack;
@@ -996,6 +1016,9 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 
 		if (!world.model.uiSelections.isInCombat) return;
 		if (shouldAttack) {
+			// Anki confirmed the rating: fetch in parallel with the attack
+			// animation, not while the card is unresolved.
+			prefetchRapidCardAfterCommit();
 			controllers.combatController.executeAnkiQuizAttack();
 		} else if (world.model.uiSelections.isPlayersCombatTurn) {
 			controllers.combatController.consumeAnkiFailedAttackAP();
@@ -1313,6 +1336,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 
 	@Override
 	public void onCombatEnded() {
+		rapidNextCard = null;
 		ankiQuiz.setVisibility(View.GONE);
 		ankiFlee.setVisibility(View.GONE);
 		hideAnkiKeyboardAndClearFocus();
