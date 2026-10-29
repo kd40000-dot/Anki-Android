@@ -998,7 +998,10 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 			ankiInput.setSelection(ankiInput.length());
 			// Diagnostic first: never silently grade an uncertain transcription.
 			// Check executes the same typed review after users inspect the result.
-			ankiStatus.setText("Offline heard: " + heard + " · Edit or Check");
+			String suggestion = vietnameseEngine.nearestDeckTerm(heard);
+			ankiStatus.setText("Offline heard: " + heard +
+					(suggestion.isEmpty() || suggestion.equalsIgnoreCase(heard) ? "" : "\nDeck suggestion (not graded): " + suggestion) +
+					" · Edit or Check");
 			ankiStatus.setVisibility(View.VISIBLE);
 		});
 	}
