@@ -663,6 +663,15 @@ public final class MainActivity
 	// Getters for the views so that controllers can access them without having to know about the view hierarchy.
 	public StatusView getStatusView() { return statusview; }
 	public MainView getMainView() { return mainview; }
+	@Override
+	public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+		super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+		if (requestCode == 7103 && combatview != null) {
+			combatview.onVietnameseMicrophonePermissionResult(
+				grantResults.length > 0 && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED);
+		}
+	}
+
 	public CombatView getCombatView() { return combatview; }
 	public QuickitemView getQuickitemView() { return quickitemview; }
 	public ToolboxView getToolboxView() { return toolboxview; }
