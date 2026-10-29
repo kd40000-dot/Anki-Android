@@ -1,4 +1,5 @@
 name: Build Andors Trail Rapid Fire APK
+# Rebuild with safe read-ahead and persistent keyboard focus.
 # Quiet no-cards-due fallback rebuild.
 # Retain the complete current Anki combat/vampire/64px integration.
 # Fleeing is Anki-free, with persistent action controls after failed/partial escapes.
@@ -62,6 +63,8 @@ jobs:
           assert "submitRapidFireAnswer();" in v
           assert "chooseAnkiRating(ankiSession.retryActive ? 1 : 3);" in v
           assert "ankiReveal.setOnClickListener((View v) -> submitRapidFireAnswer());" in v
+          assert "prefetchRapidCardAfterCommit();" in v
+          assert "rapidWaitingForNextCard = shouldAttack;" in v
           assert "if (controllers.combatController.isFleeingWithoutAnki() || ankiSession.bypassForCurrentTurn)" in v
           print("PASS: flee persists without cards; manual attack re-enters Anki quiz")
           PY
