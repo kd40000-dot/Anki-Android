@@ -131,7 +131,7 @@ jobs:
       - name: Build free-flee Andor's Trail APK
         run: |
           cd andors-upstream/AndorsTrail
-          ./gradlew assembleDebug
+          ./gradlew assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
