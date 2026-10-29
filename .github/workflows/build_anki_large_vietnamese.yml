@@ -1,0 +1,144 @@
+name: Build Andors Trail Large Vietnamese APK
+# Android 11+ speech provider visibility; auto-grade correctly recognized Vietnamese.
+# Rebuild with safe read-ahead and persistent keyboard focus.
+# Quiet no-cards-due fallback rebuild.
+# Retain the complete current Anki combat/vampire/64px integration.
+# Fleeing is Anki-free, with persistent action controls after failed/partial escapes.
+# Attacking after fleeing still requires an Anki card.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build_anki_large_vietnamese.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: andors-trail-anki-large-vietnamese
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout free-flee Anki combat overlay
+        uses: actions/checkout@v5
+        with:
+          ref: feature/anki-large-model-dynamic-deck-2026-10-29
+          sparse-checkout: |
+            andors-trail-combat
+            tools
+
+      - name: Checkout current Andor's Trail upstream
+        uses: actions/checkout@v5
+        with:
+          repository: AndorsTrailRelease/andors-trail
+          ref: master
+          path: andors-upstream
+          sparse-checkout: AndorsTrail
+
+      - name: Apply combat integration overlay
+        run: cp -a andors-trail-combat/overlay/. andors-upstream/
+
+      - name: Check flee mode is independent of the Anki attack gate
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          base=Path("andors-trail-combat/overlay/AndorsTrail/app/src/main/java/com/gpl/rpg/AndorsTrail")
+          c=(base/"controller/CombatController.java").read_text()
+          v=(base/"view/CombatView.java").read_text()
+          assert "private boolean fleeingWithoutAnki = false" in c
+          assert "if (fleeingWithoutAnki) {" in c
+          assert c.index("if (fleeingWithoutAnki) {", c.index("public void executeMoveAttack")) < c.index("if (ankiQuizGateActive) return;", c.index("public void executeMoveAttack"))
+          assert "if (world.model.uiSelections.selectedMonster != null && !fleeingWithoutAnki) return;" in c
+          assert "if (fleeingWithoutAnki) selectNextAggressiveMonster();" in c
+          assert "combatTurnListeners.onNewPlayerTurn();" in c
+          assert "if (controllers.combatController.isFleeingWithoutAnki()) {" in v
+          assert "c.stopFleeAndRequestAttack();" in v
+          assert "submitRapidFireAnswer();" in v
+          assert "chooseAnkiRating(ankiSession.retryActive ? 1 : 3);" in v
+          assert "ankiReveal.setOnClickListener((View v) -> submitRapidFireAnswer());" in v
+          assert "prefetchRapidCardAfterCommit();" in v
+          assert "rapidWaitingForNextCard = shouldAttack;" in v
+          assert "OfflineVietnameseSpeech" in v
+          assert "nearestDeckTerm(heard)" in v
+          assert "onVietnameseMicrophonePermissionResult" in v
+          assert "if (controllers.combatController.isFleeingWithoutAnki() || ankiSession.bypassForCurrentTurn)" in v
+          print("PASS: flee persists without cards; manual attack re-enters Anki quiz")
+          PY
+
+      - name: Bundle CC-BY Vietnamese-English dictionaries (no Google runtime)
+        run: |
+          python3 tools/build_offline_anki_dictionary.py \
+            andors-upstream/AndorsTrail/app/src/main/assets
+          test -s andors-upstream/AndorsTrail/app/src/main/assets/anki_vi_en_dictionary.tsv
+          grep -q '^độc lập' andors-upstream/AndorsTrail/app/src/main/assets/anki_vi_en_dictionary.tsv
+          grep -q '^thư ký' andors-upstream/AndorsTrail/app/src/main/assets/anki_vi_en_dictionary.tsv
+          grep -qx 'thư ký' andors-upstream/AndorsTrail/app/src/main/assets/anki_vietnamese_compounds.txt
+
+      - name: Add Sherpa ONNX native dependency repository
+        run: |
+          cat >> andors-upstream/AndorsTrail/build.gradle <<'EOF'
+
+          allprojects {
+            repositories {
+              maven { url 'https://jitpack.io' }
+            }
+          }
+          EOF
+
+      - name: Download Vietnamese Zipformer 30M INT8 offline model
+        run: |
+          curl --fail --location --retry 3 --output /tmp/vi-asr.tar.bz2 \
+            https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-vi-2025-04-20.tar.bz2
+          mkdir -p /tmp/vi-model
+          tar -xjf /tmp/vi-asr.tar.bz2 -C /tmp/vi-model
+          mkdir -p andors-upstream/AndorsTrail/app/src/main/assets/anki_zipformer_vi
+          cp /tmp/vi-model/sherpa-onnx-zipformer-vi-2025-04-20/{encoder-epoch-12-avg-8.onnx,decoder-epoch-12-avg-8.onnx,joiner-epoch-12-avg-8.onnx,tokens.txt} \
+            andors-upstream/AndorsTrail/app/src/main/assets/anki_zipformer_vi/
+          ls -lh andors-upstream/AndorsTrail/app/src/main/assets/anki_zipformer_vi/
+
+      - name: Configure stable test signing key
+        run: |
+          cp tools/fallback-release-keystore.jks andors-upstream/AndorsTrail/andors-debug-keystore.jks
+          cat > andors-upstream/AndorsTrail/keystore.properties <<'EOF'
+          betaStoreFile=../andors-debug-keystore.jks
+          betaStorePassword=Test@123
+          betaKeyAlias=my-key
+          betaKeyPassword=Test@123
+          EOF
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android 36 SDK
+        run: |
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Build free-flee Andor's Trail APK
+        run: |
+          cd andors-upstream/AndorsTrail
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: andors-trail-anki-large-vietnamese-apk
+          path: andors-upstream/AndorsTrail/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
