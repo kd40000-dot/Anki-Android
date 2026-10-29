@@ -86,6 +86,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	private final Button ankiRecover;
 	private final AnkiCombatReviewClient ankiClient = new AnkiCombatReviewClient();
 	private MediaPlayer ankiAudioPlayer;
+	private final java.util.ArrayDeque<android.net.Uri> pendingAnswerAudio = new java.util.ArrayDeque<>();
 	private final CombatController.AnkiCombatSession ankiSession;
 	private final Handler ankiMainHandler = new Handler(Looper.getMainLooper());
 	private boolean suppressAnkiTextWatcher = false;
@@ -513,7 +514,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 
 	private void beginAnkiQuestion(AnkiCombatReviewClient.ReviewCard card) {
 		rapidWaitingForNextCard = false;
-		releaseAnkiAudio();
+		// Do not interrupt answer pronunciation when rapid-fire presents the next card.
 		ankiSession.bypassForCurrentTurn = false;
 		ankiSession.card = card;
 		ankiSession.resetAttempt();
@@ -858,52 +859,55 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	}
 
 	private void releaseAnkiAudio() {
-		if (ankiAudioPlayer == null) return;
-		try {
-			ankiAudioPlayer.stop();
-		} catch (Exception ignored) {
-		}
-		try {
-			ankiAudioPlayer.release();
-		} catch (Exception ignored) {
-		}
+		pendingAnswerAudio.clear();
+		MediaPlayer player = ankiAudioPlayer;
 		ankiAudioPlayer = null;
+		if (player == null) return;
+		try { player.stop(); } catch (Exception ignored) {}
+		try { player.release(); } catch (Exception ignored) {}
 	}
 
+	/** Play every submitted answer in full. Rapid-fire can advance immediately,
+	 * but its next card may never preempt the previous card's pronunciation.
+	 */
 	private void playSubmittedAnswerAudio(
 			AnkiCombatReviewClient.ReviewCard card,
 			String typedAnswer) {
 		android.net.Uri audioUri = ankiClient.getAudioUri(card, typedAnswer);
 		if (audioUri == null) return;
+		pendingAnswerAudio.addLast(audioUri);
+		startNextAnswerAudio();
+	}
 
-		releaseAnkiAudio();
-		try {
-			MediaPlayer player = MediaPlayer.create(
-					getContext().getApplicationContext(),
-					audioUri);
-			if (player == null) return;
-
-			ankiAudioPlayer = player;
-			player.setOnCompletionListener((MediaPlayer finished) -> {
-				if (ankiAudioPlayer == finished) {
+	private void startNextAnswerAudio() {
+		if (ankiAudioPlayer != null) return;
+		while (!pendingAnswerAudio.isEmpty()) {
+			android.net.Uri uri = pendingAnswerAudio.removeFirst();
+			try {
+				MediaPlayer player = MediaPlayer.create(getContext().getApplicationContext(), uri);
+				if (player == null) continue;
+				ankiAudioPlayer = player;
+				player.setOnCompletionListener(finished -> finishAnswerAudio(finished));
+				player.setOnErrorListener((failed, what, extra) -> {
+					finishAnswerAudio(failed);
+					return true;
+				});
+				player.start();
+				return;
+			} catch (Exception ignored) {
+				if (ankiAudioPlayer != null) {
+					try { ankiAudioPlayer.release(); } catch (Exception alsoIgnored) {}
 					ankiAudioPlayer = null;
 				}
-				finished.release();
-			});
-			player.setOnErrorListener((MediaPlayer failed, int what, int extra) -> {
-				if (ankiAudioPlayer == failed) {
-					ankiAudioPlayer = null;
-				}
-				try {
-					failed.release();
-				} catch (Exception ignored) {
-				}
-				return true;
-			});
-			player.start();
-		} catch (Exception ignored) {
-			releaseAnkiAudio();
+			}
 		}
+	}
+
+	private void finishAnswerAudio(MediaPlayer player) {
+		if (ankiAudioPlayer != player) return;
+		ankiAudioPlayer = null;
+		try { player.release(); } catch (Exception ignored) {}
+		startNextAnswerAudio();
 	}
 
 	/**
