@@ -215,7 +215,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 			mv.post(mv::requestFocus);
 		});
 
-		ankiReveal.setOnClickListener((View v) -> revealAnkiAnswer());
+		ankiReveal.setOnClickListener((View v) -> submitRapidFireAnswer());
 		ankiAgain.setOnClickListener((View v) -> chooseAnkiRating(1));
 		ankiHard.setOnClickListener((View v) -> chooseAnkiRating(2));
 		ankiGood.setOnClickListener((View v) -> chooseAnkiRating(3));
@@ -234,15 +234,8 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		});
 
 		ankiInput.setOnEditorActionListener((v, actionId, event) -> {
-			// Rapid fire: one Enter checks a correct answer, records Good (Again
-			// for a retry), and fires the queued attack. Wrong answers continue
-			// through the existing feedback and Again/retry path unchanged.
 			if (ankiSession.phase == CombatController.AnkiCombatSession.Phase.QUESTION) {
-				revealAnkiAnswer();
-				if (ankiSession.phase == CombatController.AnkiCombatSession.Phase.ANSWER
-						&& ankiSession.typedCorrect && !ankiSession.neutralFirstExposure) {
-					chooseAnkiRating(ankiSession.retryActive ? 1 : 3);
-				}
+				submitRapidFireAnswer();
 				return true;
 			}
 			return false;
@@ -876,6 +869,21 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 			player.start();
 		} catch (Exception ignored) {
 			releaseAnkiAudio();
+		}
+	}
+
+	/**
+	 * One check action per card. Correct first attempts auto-grade Good, whereas
+	 * successful Again retries retain their forced-Again penalty. Unrecognized
+	 * and incorrect answers still show comparison and normal manual ratings.
+	 * No extra Anki reviews are created.
+	 */
+	private void submitRapidFireAnswer() {
+		if (ankiSession.phase != CombatController.AnkiCombatSession.Phase.QUESTION) return;
+		revealAnkiAnswer();
+		if (ankiSession.phase == CombatController.AnkiCombatSession.Phase.ANSWER
+				&& ankiSession.typedCorrect && !ankiSession.neutralFirstExposure) {
+			chooseAnkiRating(ankiSession.retryActive ? 1 : 3);
 		}
 	}
 
