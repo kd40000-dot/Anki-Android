@@ -234,8 +234,15 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		});
 
 		ankiInput.setOnEditorActionListener((v, actionId, event) -> {
+			// Rapid fire: one Enter checks a correct answer, records Good (Again
+			// for a retry), and fires the queued attack. Wrong answers continue
+			// through the existing feedback and Again/retry path unchanged.
 			if (ankiSession.phase == CombatController.AnkiCombatSession.Phase.QUESTION) {
 				revealAnkiAnswer();
+				if (ankiSession.phase == CombatController.AnkiCombatSession.Phase.ANSWER
+						&& ankiSession.typedCorrect && !ankiSession.neutralFirstExposure) {
+					chooseAnkiRating(ankiSession.retryActive ? 1 : 3);
+				}
 				return true;
 			}
 			return false;
