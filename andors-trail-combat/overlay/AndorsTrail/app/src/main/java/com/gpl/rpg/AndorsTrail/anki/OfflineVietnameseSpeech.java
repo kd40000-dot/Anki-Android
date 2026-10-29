@@ -15,7 +15,7 @@ import com.k2fsa.sherpa.onnx.OfflineStream;
 import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Completely offline Vietnamese recognition using the 30M INT8 Zipformer.
+/** Completely offline Vietnamese recognition using the larger 70k-hour Vietnamese Zipformer.
  * One short utterance at a time, no recordings persisted. Avoids Google ASR.
  */
 public final class OfflineVietnameseSpeech {
@@ -26,10 +26,20 @@ public final class OfflineVietnameseSpeech {
     private Thread worker;
     private AudioRecord recorder;
     private OfflineRecognizer recognizer;
+    private java.util.List<String> selectedVocabulary = java.util.Collections.emptyList();
+    private String vocabularyDeck = "";
 
     public OfflineVietnameseSpeech(Context context) { app = context.getApplicationContext(); }
 
     public synchronized void listen(Result callback) {
+        // Refresh current deck for every utterance so deck changes and newly
+        // added notes are reflected without reinstalling the game.
+        try {
+            selectedVocabulary = new AnkiCombatReviewClient()
+                .getSelectedDeckVietnameseVocabulary(app.getContentResolver());
+        } catch (Exception ignored) {
+            selectedVocabulary = java.util.Collections.emptyList();
+        }
         stop();
         cancelled.set(false);
         worker = new Thread(() -> {
@@ -41,9 +51,9 @@ public final class OfflineVietnameseSpeech {
                 if (recognizer == null) {
                     String dir = "anki_zipformer_vi";
                     OfflineTransducerModelConfig transducer = new OfflineTransducerModelConfig();
-                    transducer.setEncoder(dir + "/encoder.int8.onnx");
-                    transducer.setDecoder(dir + "/decoder.onnx");
-                    transducer.setJoiner(dir + "/joiner.int8.onnx");
+                    transducer.setEncoder(dir + "/encoder-epoch-12-avg-8.onnx");
+                    transducer.setDecoder(dir + "/decoder-epoch-12-avg-8.onnx");
+                    transducer.setJoiner(dir + "/joiner-epoch-12-avg-8.onnx");
                     OfflineModelConfig model = new OfflineModelConfig();
                     model.setTransducer(transducer);
                     model.setTokens(dir + "/tokens.txt");
@@ -102,6 +112,32 @@ public final class OfflineVietnameseSpeech {
             if (!cancelled.get()) ui.post(() -> callback.onResult(text, failure));
         }, "AnkiOfflineVietnameseASR");
         worker.start();
+    }
+
+    /** Non-authoritative nearest vocabulary match for diagnostics only.
+     * Never overwrite raw transcript or accept answers on similarity alone.
+     */
+    public String nearestDeckTerm(String raw) {
+        if (raw == null || raw.trim().isEmpty()) return "";
+        String normalized = java.text.Normalizer.normalize(raw.toLowerCase(java.util.Locale.ROOT).trim(), java.text.Normalizer.Form.NFC);
+        String best = "";
+        int bestDistance = Integer.MAX_VALUE;
+        for (String term : selectedVocabulary) {
+            int d = distance(normalized, term);
+            if (d < bestDistance) { bestDistance = d; best = term; }
+        }
+        return bestDistance <= Math.max(1, normalized.length()/4) ? best : "";
+    }
+    private static int distance(String a, String b) {
+        int[] prev = new int[b.length()+1], cur = new int[b.length()+1];
+        for(int j=0;j<=b.length();j++) prev[j]=j;
+        for(int i=1;i<=a.length();i++) {
+            cur[0]=i;
+            for(int j=1;j<=b.length();j++)
+                cur[j]=Math.min(Math.min(cur[j-1]+1,prev[j]+1),prev[j-1]+(a.charAt(i-1)==b.charAt(j-1)?0:1));
+            int[] temp=prev;prev=cur;cur=temp;
+        }
+        return prev[b.length()];
     }
 
     public void stop() {
