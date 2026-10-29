@@ -1,5 +1,5 @@
 name: Build Andors Trail Rapid Fire APK
-# Add Vietnamese speech input and auto-grade correct recognized answers.
+# Android 11+ speech provider visibility; auto-grade correctly recognized Vietnamese.
 # Rebuild with safe read-ahead and persistent keyboard focus.
 # Quiet no-cards-due fallback rebuild.
 # Retain the complete current Anki combat/vampire/64px integration.
