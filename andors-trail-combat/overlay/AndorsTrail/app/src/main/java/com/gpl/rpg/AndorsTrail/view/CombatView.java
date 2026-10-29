@@ -25,6 +25,8 @@ import android.view.animation.Animation.AnimationListener;
 import android.view.animation.AnimationUtils;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
+import android.app.AlertDialog;
+import java.text.Normalizer;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
@@ -75,6 +77,10 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	private final AnkiWordTranslator ankiWordTranslator = new AnkiWordTranslator();
 	private final EditText ankiInput;
 	private final Button ankiReveal;
+	private final LinearLayout diacriticEditor;
+	private boolean diacriticMode;
+	private char[] diacriticLetters;
+	private String diacriticTarget;
 	private final TextView ankiFeedback;
 	private final TextView ankiAnswer;
 	private final LinearLayout ankiRatings;
@@ -201,6 +207,12 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		ankiWordTranslation = (TextView) findViewById(R.id.combatview_anki_word_translation);
 		ankiInput = (EditText) findViewById(R.id.combatview_anki_input);
 		ankiReveal = (Button) findViewById(R.id.combatview_anki_reveal);
+		diacriticEditor = new LinearLayout(getContext());
+		diacriticEditor.setOrientation(LinearLayout.VERTICAL);
+		diacriticEditor.setVisibility(View.GONE);
+		ViewGroup inputParent = (ViewGroup) ankiInput.getParent();
+		inputParent.addView(diacriticEditor, inputParent.indexOfChild(ankiInput) + 1,
+				new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 		ankiFeedback = (TextView) findViewById(R.id.combatview_anki_feedback);
 		ankiAnswer = (TextView) findViewById(R.id.combatview_anki_answer);
 		ankiRatings = (LinearLayout) findViewById(R.id.combatview_anki_ratings);
@@ -661,6 +673,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	}
 
 	private void renderLoadingState() {
+		diacriticEditor.setVisibility(View.GONE);
 		prepareQuizFrame();
 		ankiStatus.setText(ankiSession.errorMessage.isEmpty() ? "Loading Anki card…" : ankiSession.errorMessage);
 		ankiWordTranslator.reset(ankiQuestion, ankiWordTranslation);
@@ -681,6 +694,83 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		}
 	}
 
+	private static String stripVietnamese(String s) {
+		String decomposed = Normalizer.normalize(s.replace('đ','d').replace('Đ','D'), Normalizer.Form.NFD);
+		return decomposed.replaceAll("\\p{M}+", "");
+	}
+
+	private boolean eligibleForDiacriticReview(AnkiCombatReviewClient.ReviewCard card) {
+		if (card == null || card.reps == 0 || ankiSession.retryActive) return false;
+		String answer = card.answer == null ? "" : card.answer.trim();
+		// Alternatives, long sentences and cloze markup stay on full typing.
+		if (answer.indexOf('|') >= 0 || answer.length() > 55 ||
+				answer.split("\\s+").length > 5 || !answer.matches("(?U)[\\p{L}\\p{M} ]+")) return false;
+		return !stripVietnamese(answer).equals(answer);
+	}
+
+	private static String choicesFor(char c) {
+		switch (Character.toLowerCase(c)) {
+			case 'a': return "aàáảãạăằắẳẵặâầấẩẫậ";
+			case 'e': return "eèéẻẽẹêềếểễệ";
+			case 'i': return "iìíỉĩị";
+			case 'o': return "oòóỏõọôồốổỗộơờớởỡợ";
+			case 'u': return "uùúủũụưừứửữự";
+			case 'y': return "yỳýỷỹỵ";
+			case 'd': return "dđ";
+			default: return "" + c;
+		}
+	}
+
+	private void showDiacriticChoices(int position) {
+		if (diacriticLetters == null || position < 0 || position >= diacriticLetters.length) return;
+		char plain = stripVietnamese(String.valueOf(diacriticLetters[position])).charAt(0);
+		String chars = choicesFor(plain);
+		String[] choices = new String[chars.length()];
+		for (int i=0;i<chars.length();i++) choices[i] = String.valueOf(chars.charAt(i));
+		new AlertDialog.Builder(getContext())
+				.setTitle("Choose Vietnamese character")
+				.setItems(choices, (dialog, which) -> {
+					diacriticLetters[position] = choices[which].charAt(0);
+					setInputTextWithoutWatcher(new String(diacriticLetters));
+					ankiSession.typedText = new String(diacriticLetters);
+					renderDiacriticLetters();
+				}).show();
+	}
+
+	private void renderDiacriticLetters() {
+		diacriticEditor.removeAllViews();
+		if (diacriticLetters == null) return;
+		TextView instruction = new TextView(getContext());
+		instruction.setText("Restore the missing Vietnamese characters · Tap a letter");
+		instruction.setTextColor(Color.WHITE);
+		instruction.setTextSize(14);
+		diacriticEditor.addView(instruction);
+		LinearLayout line = new LinearLayout(getContext());
+		line.setOrientation(LinearLayout.HORIZONTAL);
+		diacriticEditor.addView(line);
+		int onLine = 0;
+		for(int i=0;i<diacriticLetters.length;i++) {
+			final int position=i;
+			if (diacriticLetters[i]==' ' || onLine >= 10) {
+				line = new LinearLayout(getContext());
+				line.setOrientation(LinearLayout.HORIZONTAL);
+				diacriticEditor.addView(line);
+				onLine=0;
+				if(diacriticLetters[i]==' ') continue;
+			}
+			Button letter=new Button(getContext());
+			letter.setText(String.valueOf(diacriticLetters[i]));
+			letter.setTextSize(17);
+			letter.setAllCaps(false);
+			letter.setMinWidth(0);
+			letter.setMinimumWidth(0);
+			letter.setPadding(0,0,0,0);
+			line.addView(letter, new LinearLayout.LayoutParams(0, (int)(44*getResources().getDisplayMetrics().density), 1));
+			letter.setOnClickListener(v -> showDiacriticChoices(position));
+			onLine++;
+		}
+	}
+
 	private void renderQuestionState() {
 		AnkiCombatReviewClient.ReviewCard card = ankiSession.card;
 		if (card == null) {
@@ -693,9 +783,23 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		ankiStatus.setText("");
 		ankiStatus.setVisibility(View.GONE);
 		ankiWordTranslator.renderQuestion(ankiQuestion, ankiWordTranslation, card.question);
-		setInputTextWithoutWatcher(ankiSession.typedText);
+		diacriticMode = eligibleForDiacriticReview(card);
+		if (diacriticMode) {
+			diacriticTarget = card.answer.trim();
+			String initial = ankiSession.typedText != null && !ankiSession.typedText.isEmpty()
+					? ankiSession.typedText : stripVietnamese(diacriticTarget);
+			diacriticLetters = initial.toCharArray();
+			setInputTextWithoutWatcher(initial);
+			ankiSession.typedText = initial;
+			diacriticEditor.setVisibility(View.VISIBLE);
+			renderDiacriticLetters();
+			hideAnkiKeyboardAndClearFocus();
+		} else {
+			diacriticEditor.setVisibility(View.GONE);
+			setInputTextWithoutWatcher(ankiSession.typedText);
+		}
 		ankiInput.setEnabled(true);
-		ankiInput.setVisibility(View.VISIBLE);
+		ankiInput.setVisibility(diacriticMode ? View.GONE : View.VISIBLE);
 		ankiReveal.setEnabled(true);
 		ankiReveal.setVisibility(View.VISIBLE);
 		ankiFeedback.setVisibility(View.GONE);
@@ -708,7 +812,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		setRatingLabel(ankiGood, "Good", card.nextIntervals, 2);
 		setRatingLabel(ankiEasy, "Easy", card.nextIntervals, 3);
 
-		focusAnkiInputAndShowKeyboard();
+		if (!diacriticMode) focusAnkiInputAndShowKeyboard();
 
 		if (!ankiSession.errorMessage.isEmpty()) {
 			ankiStatus.setText(ankiSession.errorMessage);
@@ -718,6 +822,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	}
 
 	private void renderAnswerState(boolean submitting) {
+		diacriticEditor.setVisibility(View.GONE);
 		AnkiCombatReviewClient.ReviewCard card = ankiSession.card;
 		if (card == null) {
 			ankiSession.setPhase(CombatController.AnkiCombatSession.Phase.IDLE);
@@ -732,7 +837,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		// between reveal -> rating -> next combat question. Changes made after reveal
 		// are ignored because the attempt result has already been captured.
 		ankiInput.setEnabled(true);
-		ankiInput.setVisibility(View.VISIBLE);
+		ankiInput.setVisibility(diacriticMode ? View.GONE : View.VISIBLE);
 		ankiReveal.setVisibility(View.GONE);
 
 		// The highlighted comparison itself is the feedback. Keep the old feedback
