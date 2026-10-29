@@ -1109,9 +1109,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		hideAnkiKeyboardAndClearFocus();
 		actionBar.setVisibility(View.VISIBLE);
 		setRatingButtonsEnabled(true);
-		if (message != null && !message.isEmpty()) {
-			Toast.makeText(getContext(), message + " Normal combat enabled.", Toast.LENGTH_LONG).show();
-		}
+		// Quiet fallback: normal combat still works when no cards are due.
 	}
 
 	private void toggleConditionsBarVisibility() {
