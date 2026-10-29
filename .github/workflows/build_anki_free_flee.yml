@@ -1,4 +1,5 @@
 name: Build Andors Trail Free Flee APK
+# Quiet no-cards-due fallback rebuild.
 # Retain the complete current Anki combat/vampire/64px integration.
 # Fleeing is Anki-free, with persistent action controls after failed/partial escapes.
 # Attacking after fleeing still requires an Anki card.
