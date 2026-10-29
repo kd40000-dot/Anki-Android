@@ -963,6 +963,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		final boolean wasNeutral = ankiSession.neutralFirstExposure;
 
 		if (!wasNeutral && !wasCorrect && tappedEase == 1) {
+			controllers.combatController.recordAnkiMomentumResult(false);
 			ankiSession.retryActive = true;
 			ankiSession.retryCard = card;
 			ankiSession.card = null;
@@ -1033,6 +1034,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 	private void finishSubmittedReview(long operation) {
 		if (operation != ankiSession.operationId) return;
 		boolean shouldAttack = ankiSession.pendingShouldAttack;
+		controllers.combatController.recordAnkiMomentumResult(shouldAttack);
 		int recordedEase = ankiSession.pendingEffectiveEase;
 		controllers.combatController.setLastAnkiRecordedEase(recordedEase);
 		ankiSession.resetAll();
@@ -1049,7 +1051,7 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		if (shouldAttack) {
 			// Anki confirmed the rating: fetch in parallel with the attack
 			// animation, not while the card is unresolved.
-			prefetchRapidCardAfterCommit();
+			if (controllers.combatController.getAnkiMomentumStage() == 1) prefetchRapidCardAfterCommit();
 			controllers.combatController.executeAnkiQuizAttack();
 		} else if (world.model.uiSelections.isPlayersCombatTurn) {
 			controllers.combatController.consumeAnkiFailedAttackAP();
