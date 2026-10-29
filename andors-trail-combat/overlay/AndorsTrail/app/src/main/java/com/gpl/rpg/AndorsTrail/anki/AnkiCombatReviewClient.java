@@ -63,7 +63,7 @@ public final class AnkiCombatReviewClient {
         java.util.LinkedHashSet<String> terms = new java.util.LinkedHashSet<>();
         Uri selected = Uri.parse("content://" + AUTHORITY + "/selected_deck/");
         String deckName = "";
-        try (Cursor c = resolver.query(selected, new String[]{"name"}, null, null, null)) {
+        try (Cursor c = resolver.query(selected, new String[]{"deck_name"}, null, null, null)) {
             if (c != null && c.moveToFirst()) deckName = c.getString(0);
         }
         if (deckName == null || deckName.trim().isEmpty()) return new java.util.ArrayList<>(terms);
