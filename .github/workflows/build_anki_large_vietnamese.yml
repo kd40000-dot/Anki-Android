@@ -1,4 +1,5 @@
 name: Build Andors Trail Large Vietnamese APK
+# Selected deck API uses deck_name; rebuild with provider-compatible query.
 # Android 11+ speech provider visibility; auto-grade correctly recognized Vietnamese.
 # Rebuild with safe read-ahead and persistent keyboard focus.
 # Quiet no-cards-due fallback rebuild.
