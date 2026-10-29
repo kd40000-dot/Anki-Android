@@ -27,6 +27,7 @@ android {
         applicationId "com.gpl.rpg.AndorsTrail"
         minSdkVersion 21
         targetSdkVersion 36
+        ndk { abiFilters "arm64-v8a" }
     }
 
     signingConfigs {
