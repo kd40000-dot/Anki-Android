@@ -49,6 +49,51 @@ public final class CombatController implements VisualEffectCompletedCallback {
 	// through failed flee rolls and intervening monster rounds until the
 	// player exits combat or explicitly elects to attack again.
 	private boolean fleeingWithoutAnki = false;
+	// Momentum persists across encounters until an incorrect typed attempt.
+	// 0-2 correct: card per attack; 3-6: card per turn; 7+: card per enemy.
+	private int ankiCorrectStreak = 0;
+	private boolean ankiTurnUnlocked = false;
+	private Monster ankiUnlockedEnemy = null;
+
+	public int getAnkiMomentumStage() {
+		return ankiCorrectStreak >= 7 ? 3 : ankiCorrectStreak >= 3 ? 2 : 1;
+	}
+	public int getAnkiCorrectStreak() { return ankiCorrectStreak; }
+	public void recordAnkiMomentumResult(boolean correct) {
+		if (!correct) {
+			ankiCorrectStreak = 0;
+			ankiTurnUnlocked = false;
+			ankiUnlockedEnemy = null;
+			return;
+		}
+		ankiCorrectStreak = Math.min(7, ankiCorrectStreak + 1);
+		if (getAnkiMomentumStage() >= 2) ankiTurnUnlocked = true;
+		if (getAnkiMomentumStage() >= 3) ankiUnlockedEnemy = world.model.uiSelections.selectedMonster;
+	}
+	private boolean hasAnkiMomentumAttack() {
+		if (fleeingWithoutAnki || ankiCombatSession.retryActive
+				|| world.model.uiSelections.selectedMonster == null) return false;
+		int stage = getAnkiMomentumStage();
+		return stage == 3 ? ankiUnlockedEnemy == world.model.uiSelections.selectedMonster
+				: stage == 2 && ankiTurnUnlocked;
+	}
+	private void continueMomentumOrRequestCard() {
+		if (!world.model.uiSelections.isInCombat || !world.model.uiSelections.isPlayersCombatTurn) return;
+		if (!world.model.player.hasAPs(world.model.player.getAttackCost())) return;
+		if (hasAnkiMomentumAttack()) {
+			ankiQuizGateActive = false;
+			new Handler().postDelayed(() -> {
+				if (world.model.uiSelections.isInCombat && world.model.uiSelections.isPlayersCombatTurn
+						&& world.model.player.hasAPs(world.model.player.getAttackCost())
+						&& hasAnkiMomentumAttack() && !ankiAttackPendingCompletion)
+					executeAnkiQuizAttack();
+			}, 80);
+		} else {
+			ankiQuizGateActive = true;
+			combatTurnListeners.onNewPlayerTurn();
+		}
+	}
+
 
 	public boolean isFleeingWithoutAnki() { return fleeingWithoutAnki; }
 
@@ -377,11 +422,7 @@ public final class CombatController implements VisualEffectCompletedCallback {
 	private void continueAfterAnkiAction() {
 		playerActionCompleted();
 		if (!world.model.uiSelections.isInCombat || !world.model.uiSelections.isPlayersCombatTurn) return;
-		if (world.model.player.hasAPs(world.model.player.getAttackCost())) {
-			ankiQuizGateActive = true;
-			// Existing callback shows a new card (or an unresolved Again retry).
-			combatTurnListeners.onNewPlayerTurn();
-		}
+		continueMomentumOrRequestCard();
 	}
 
 	public void executeAnkiQuizAttack() {
@@ -492,6 +533,7 @@ public final class CombatController implements VisualEffectCompletedCallback {
 
 		combatActionListeners.onPlayerKilledMonster(killedMonster);
 
+		if (ankiUnlockedEnemy == killedMonster) ankiUnlockedEnemy = null;
 		if (world.model.uiSelections.selectedMonster == killedMonster) {
 			selectNextAggressiveMonster();
 		}
@@ -759,7 +801,9 @@ public final class CombatController implements VisualEffectCompletedCallback {
 		if (!isFirstRound) controllers.gameRoundController.onNewPlayerRound();
 		world.model.uiSelections.isPlayersCombatTurn = true;
 
-		combatTurnListeners.onNewPlayerTurn();
+		ankiTurnUnlocked = false;
+		if (hasAnkiMomentumAttack()) continueMomentumOrRequestCard();
+		else combatTurnListeners.onNewPlayerTurn();
 	}
 
 	private static boolean hasCriticalAttack(Actor attacker, Actor target) {
