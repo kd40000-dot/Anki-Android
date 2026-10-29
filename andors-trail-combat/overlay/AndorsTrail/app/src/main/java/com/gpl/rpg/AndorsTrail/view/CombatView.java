@@ -964,77 +964,49 @@ public final class CombatView extends RelativeLayout implements CombatSelectionL
 		else Toast.makeText(getContext(), "Microphone permission denied. You can type instead.", Toast.LENGTH_SHORT).show();
 	}
 
+	private com.gpl.rpg.AndorsTrail.anki.OfflineVietnameseSpeech vietnameseEngine;
+
 	private void startVietnameseRecognizer() {
-		if (!isAttachedToWindow()
-				|| ankiSession.phase != CombatController.AnkiCombatSession.Phase.QUESTION) return;
-		if (!SpeechRecognizer.isRecognitionAvailable(getContext())) {
-			Toast.makeText(getContext(), "No Android speech recognizer is installed. Type your answer instead.", Toast.LENGTH_LONG).show();
-			return;
-		}
+		if (!isAttachedToWindow() || ankiSession.phase != CombatController.AnkiCombatSession.Phase.QUESTION) return;
 		stopVietnameseSpeech();
+		if (vietnameseEngine == null)
+			vietnameseEngine = new com.gpl.rpg.AndorsTrail.anki.OfflineVietnameseSpeech(getContext());
+		ankiListening = true;
 		speechOperation = ankiSession.operationId;
-		try {
-			ankiSpeechRecognizer = SpeechRecognizer.createSpeechRecognizer(getContext());
-			ankiSpeechRecognizer.setRecognitionListener(new RecognitionListener() {
-				@Override public void onReadyForSpeech(Bundle params) {
-					ankiMic.setText("🎙 Listening… Tap to stop");
-				}
-				@Override public void onBeginningOfSpeech() {}
-				@Override public void onRmsChanged(float rmsdB) {}
-				@Override public void onBufferReceived(byte[] buffer) {}
-				@Override public void onEndOfSpeech() { ankiMic.setText("Recognizing Vietnamese…"); }
-				@Override public void onError(int error) {
-					stopVietnameseSpeech();
-					Toast.makeText(getContext(), "Speech not recognized ("+error+"). Try again or type.", Toast.LENGTH_SHORT).show();
-				}
-				@Override public void onResults(Bundle results) {
-					ArrayList<String> candidates = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-					boolean sameQuestion = ankiSession.phase == CombatController.AnkiCombatSession.Phase.QUESTION
-							&& speechOperation == ankiSession.operationId;
-					stopVietnameseSpeech();
-					if (!sameQuestion || candidates == null || candidates.isEmpty()) return;
-					// The first hypothesis is displayed, never auto-submitted: accents
-					// and names may be misrecognized and should be correctable by typing.
-					setInputTextWithoutWatcher(candidates.get(0));
-					ankiSession.typedText = candidates.get(0);
-					ankiInput.setSelection(ankiInput.length());
-					if (ankiSession.card != null
-							&& ankiClient.isCorrect(candidates.get(0), ankiSession.card.answer)) {
-						// Correct speech follows exactly the same one-review-per-attack
-						// check as typed Enter, without an additional tap.
-						submitRapidFireAnswer();
-					} else {
-						ankiStatus.setText("Heard: "+candidates.get(0)+" — edit or tap Check.");
-						ankiStatus.setVisibility(View.VISIBLE);
-					}
-				}
-				@Override public void onPartialResults(Bundle partialResults) {}
-				@Override public void onEvent(int eventType,Bundle params) {}
-			});
-			Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-			intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-			intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "vi-VN");
-			intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "vi-VN");
-			intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
-			intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
-			intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true);
-			ankiListening=true;
-			ankiMic.setText("🎙 Listening… Tap to stop");
-			hideAnkiKeyboardAndClearFocus();
-			ankiSpeechRecognizer.startListening(intent);
-		} catch(Exception e) {
-			stopVietnameseSpeech();
-			Toast.makeText(getContext(), "Cannot start Vietnamese speech input. Please type instead.", Toast.LENGTH_SHORT).show();
-		}
+		final long operation = speechOperation;
+		ankiMic.setText("🎙 Listening… Tap to stop");
+		ankiStatus.setText("Offline Vietnamese model · speak now");
+		ankiStatus.setVisibility(View.VISIBLE);
+		hideAnkiKeyboardAndClearFocus();
+		vietnameseEngine.listen((heard, error) -> {
+			if (!ankiListening || operation != ankiSession.operationId ||
+					ankiSession.phase != CombatController.AnkiCombatSession.Phase.QUESTION) return;
+			ankiListening = false;
+			ankiMic.setText("🎤 Speak Vietnamese");
+			if (error != null) {
+				ankiStatus.setText("Offline microphone/recognizer: " + error);
+				ankiStatus.setVisibility(View.VISIBLE);
+				return;
+			}
+			if (heard == null || heard.trim().isEmpty()) {
+				ankiStatus.setText("No Vietnamese recognized. Try again or type.");
+				ankiStatus.setVisibility(View.VISIBLE);
+				return;
+			}
+			setInputTextWithoutWatcher(heard);
+			ankiSession.typedText = heard;
+			ankiInput.setSelection(ankiInput.length());
+			// Diagnostic first: never silently grade an uncertain transcription.
+			// Check executes the same typed review after users inspect the result.
+			ankiStatus.setText("Offline heard: " + heard + " · Edit or Check");
+			ankiStatus.setVisibility(View.VISIBLE);
+		});
 	}
 
 	private void stopVietnameseSpeech() {
-		ankiListening=false;
+		ankiListening = false;
 		ankiMic.setText("🎤 Speak Vietnamese");
-		if (ankiSpeechRecognizer != null) {
-			ankiSpeechRecognizer.destroy();
-			ankiSpeechRecognizer=null;
-		}
+		if (vietnameseEngine != null) vietnameseEngine.stop();
 	}
 
 	private void submitRapidFireAnswer() {
