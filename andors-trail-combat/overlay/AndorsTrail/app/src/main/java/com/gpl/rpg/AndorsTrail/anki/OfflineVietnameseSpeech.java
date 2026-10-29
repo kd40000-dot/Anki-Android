@@ -32,19 +32,18 @@ public final class OfflineVietnameseSpeech {
     public OfflineVietnameseSpeech(Context context) { app = context.getApplicationContext(); }
 
     public synchronized void listen(Result callback) {
-        // Refresh current deck for every utterance so deck changes and newly
-        // added notes are reflected without reinstalling the game.
-        try {
-            selectedVocabulary = new AnkiCombatReviewClient()
-                .getSelectedDeckVietnameseVocabulary(app.getContentResolver());
-        } catch (Exception ignored) {
-            selectedVocabulary = java.util.Collections.emptyList();
-        }
         stop();
         cancelled.set(false);
         worker = new Thread(() -> {
             String result = "", error = null;
             try {
+                // Provider reads can be slow on large decks; never run on UI thread.
+                try {
+                    selectedVocabulary = new AnkiCombatReviewClient()
+                        .getSelectedDeckVietnameseVocabulary(app.getContentResolver());
+                } catch (Exception ignored) {
+                    selectedVocabulary = java.util.Collections.emptyList();
+                }
                 if (android.os.Build.VERSION.SDK_INT >= 23 &&
                     app.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
                     throw new SecurityException("Microphone permission required");
